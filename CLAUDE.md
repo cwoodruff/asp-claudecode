@@ -27,18 +27,18 @@ dotnet test /p:CollectCoverage=true
 
 ## Architecture
 
-This is **Intelligently**, an ASP.NET Core 10 AI-powered tutoring platform using Claude (Anthropic SDK). It follows a layered architecture:
+This is **Intelligently**, an ASP.NET Core 10 AI-powered tutoring platform using Claude (official `Anthropic` NuGet SDK). It follows a layered architecture:
 
 - **Intelligently.Core** — Domain entities and interfaces. No external dependencies. Contains `IAnthropicService` and all AI domain entities (AIConversation, AIMessage, AIEscalation, AIKnowledgeEntry, AIAnalyticsEvent) in `Entities/AI/`.
-- **Intelligently.Infrastructure** — Data access (EF Core 10 + SQL Server) and external services. `AnthropicService` wraps the Anthropic SDK with Polly retry (exponential backoff, 3 attempts). `IntelligentlyDbContext` extends `IdentityDbContext`.
-- **Intelligently.Web** — Main Razor Pages app. Configures rate limiting (per-user sliding window: 10 msgs/min for chat, 120 reqs/min global) and DI for Anthropic service.
+- **Intelligently.Infrastructure** — Data access (EF Core 10 + SQL Server) and external services. `AnthropicService` wraps the official Anthropic SDK (`client.Messages.Create` / `CreateStreaming`); the SDK's built-in retry handles 408/409/429/5xx, so there is no Polly wrapper. A `refusal` stop reason throws `AIRefusalException` (Core). `IntelligentlyDbContext` extends `IdentityDbContext`.
+- **Intelligently.Web** — Main Razor Pages app. Configures rate limiting (per-user sliding window: 10 msgs/min for chat, 120 reqs/min global), DI for the Anthropic client/service, and OpenTelemetry (ActivitySource `Intelligently.Agents`; console exporter in Development, OTLP via `Otel:Endpoint` otherwise).
 - **Intelligently.Admin** — Admin portal (Razor Pages).
 
 Dependency flow: Web/Admin → Infrastructure → Core.
 
 ## Key Patterns
 
-- **AI integration**: `IAnthropicService` (Core) / `AnthropicService` (Infrastructure) supports both streaming (`IAsyncEnumerable<string>`) and non-streaming completions. Default models: Haiku for completions, Sonnet for streaming.
+- **AI integration**: `IAnthropicService` (Core) / `AnthropicService` (Infrastructure) supports both streaming (`IAsyncEnumerable<string>`) and non-streaming completions. Default model for both paths is `claude-opus-5-5` (adaptive thinking); `AnthropicService.CheapModel` (`claude-haiku-5-5`) is for cheap routes.
 - **Escalation workflow**: AI conversations can escalate to instructors; resolved escalations can feed back into the knowledge base (`AIKnowledgeEntry`).
 - **Rate limiting**: Built-in ASP.NET Core 10 rate limiter (no external packages). Named policy `chat` with sliding window.
 - **Frontend**: htmx (jQuery and Bootstrap were removed).
@@ -47,6 +47,8 @@ Dependency flow: Web/Admin → Infrastructure → Core.
 
 - `ConnectionStrings:DefaultConnection` — SQL Server connection string
 - `Anthropic:ApiKey` — Anthropic API key (validated at startup)
+- `Otel:Endpoint` — OTLP collector endpoint (non-Development only)
+- `Agents` — `DefaultModel`, `CheapModel`, `Budgets` (`ReplansLeft`, `RetriesLeft`, `ToolCallsLeft`, `TokensLeft`)
 
 ## Testing Stack
 
