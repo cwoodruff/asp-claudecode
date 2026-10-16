@@ -121,7 +121,8 @@ than wait for a key. To run it later:
 
 2. Start the Web app (`dotnet run --project src/Intelligently.Web`, Development profile, LocalDB) and
    sign in as the seeded learner (accounts in `verification-local-accounts.md` in the side-session notes
-   folder, or provision a learner with an `intelligently:course` claim for course 1 through `UserManager`).
+   folder, or create one with `dotnet run --project src/Intelligently.Tools -- create-user --username learner1
+   --email learner1@example.edu --course 1`, see the user guide section 1.4).
 3. Create one run as that learner with `POST /agent/runs`: `courseId` 1, `taskType` `LabErrorDiagnosis`, and
    the lab above as `taskSpec` (`language` `csharp`, `entrypoint` `Program.cs`, `course_files` empty).
 4. Watch `GET /agent/runs/{id}` (htmx partial polls while Running) and, as the seeded instructor, the Admin

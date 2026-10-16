@@ -417,8 +417,9 @@ for this system:
   `AspNetUserClaims` per enrolled course id. The run principal's course scope is built from these claims
   and nothing else. This is a placeholder until a dedicated enrolment entity exists.
 
-Accounts are provisioned out of band; there is no registration page. The [User Guide](user-guide.md)
-explains how to create users, roles, and enrolment claims.
+There is no registration page and no seed data. Users, the `Instructor` role, and enrolment claims are
+created with the account tool in `src/Intelligently.Tools`; the [User Guide](user-guide.md), section 1.4,
+explains it.
 
 ---
 

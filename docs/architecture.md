@@ -44,6 +44,7 @@ collector.
 | `Intelligently.Infrastructure` | EF Core data access, Identity, the Anthropic client wrapper, and every plane's implementation | Core |
 | `Intelligently.Web` | Learner Razor Pages, the run API, the run worker, OpenTelemetry | Infrastructure |
 | `Intelligently.Admin` | Instructor Razor Pages: approvals, runs, escalations | Infrastructure |
+| `Intelligently.Tools` | Console account tool: create users, grant courses, manage the `Instructor` role | Infrastructure |
 | `Intelligently.UnitTests` | The real runtime on SQLite in-memory with a mocked reasoning engine | Infrastructure |
 | `Intelligently.IntegrationTests` | Both hosts under `WebApplicationFactory`, plus the evaluation harness | Web, Admin |
 
@@ -219,7 +220,7 @@ The important properties of this flow:
 ## 6. Identity and authorization
 
 Both hosts use ASP.NET Core Identity with cookie authentication over the shared database. There is no
-registration page; accounts are provisioned out of band.
+registration page; accounts are provisioned with the account tool (`src/Intelligently.Tools`).
 
 - A **learner** is any authenticated user. Course enrolment is a set of `intelligently:course` claims,
   one per course id.
