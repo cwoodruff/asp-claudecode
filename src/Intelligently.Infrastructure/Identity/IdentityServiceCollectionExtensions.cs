@@ -42,11 +42,12 @@ public static class IdentityServiceCollectionExtensions
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Lax;
             options.SlidingExpiration = true;
-            options.Events = new CookieAuthenticationEvents
-            {
-                OnRedirectToLogin = context => RedirectOrStatus(context, StatusCodes.Status401Unauthorized),
-                OnRedirectToAccessDenied = context => RedirectOrStatus(context, StatusCodes.Status403Forbidden),
-            };
+            // Only the two redirect delegates change. AddIdentity installs the events object with
+            // OnValidatePrincipal = SecurityStampValidator.ValidatePrincipalAsync, which must stay so a
+            // password reset, deletion or role/course-claim change invalidates existing cookies.
+            options.Events ??= new CookieAuthenticationEvents();
+            options.Events.OnRedirectToLogin = context => RedirectOrStatus(context, StatusCodes.Status401Unauthorized);
+            options.Events.OnRedirectToAccessDenied = context => RedirectOrStatus(context, StatusCodes.Status403Forbidden);
         });
 
         services.AddAuthorization(options =>

@@ -31,20 +31,26 @@ builder.Services.AddIntelligentlyIdentity();
 // The 'chat' named policy is applied only to /chat/* endpoints via .RequireRateLimiting.
 builder.Services.AddRateLimiter(options =>
 {
-    // Named sliding-window policy — applied explicitly to chat endpoints only
-    options.AddSlidingWindowLimiter(policyName: "chat", opt =>
-    {
-        opt.PermitLimit           = 10;                       // 10 messages...
-        opt.Window                = TimeSpan.FromMinutes(1);  // ...per 60-second window
-        opt.SegmentsPerWindow     = 6;                        // window divided into 6 x 10s buckets
-        opt.QueueProcessingOrder  = QueueProcessingOrder.OldestFirst;
-        opt.QueueLimit            = 2;                        // queue up to 2 extra before rejecting
-    });
+    // Named sliding-window policy — applied explicitly to chat and agent-run endpoints only.
+    // Partitioned by the authenticated user id (IP for the anonymous paths), so each learner has
+    // their own window; a single AddSlidingWindowLimiter would be one window shared by everyone.
+    options.AddPolicy("chat", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                AutoReplenishment     = true,
+                PermitLimit           = 10,                       // 10 messages...
+                Window                = TimeSpan.FromMinutes(1),  // ...per 60-second window
+                SegmentsPerWindow     = 6,                        // window divided into 6 x 10s buckets
+                QueueProcessingOrder  = QueueProcessingOrder.OldestFirst,
+                QueueLimit            = 2,                        // queue up to 2 extra before rejecting
+            }));
  
     // Global limiter — per authenticated user, protects ALL endpoints as a backstop
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            partitionKey: ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
@@ -67,8 +73,8 @@ builder.Services.AddRateLimiter(options =>
  
 // ── Middleware pipeline order (rate limiter MUST come after UseRouting) ────────────
 // app.UseRouting();
-// app.UseRateLimiter();   // <-- after routing, before endpoints
-// app.UseAuthentication();
+// app.UseAuthentication(); // <-- before the limiter, so partitions see the signed-in user
+// app.UseRateLimiter();    // <-- after routing, before endpoints
 // app.UseAuthorization();
 // app.MapRazorPages();
  
@@ -138,8 +144,8 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseRouting();
+app.UseAuthentication();   // before the limiter: its partitions are keyed by the signed-in user
 app.UseRateLimiter();      // after routing, before endpoints (see note above)
-app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
