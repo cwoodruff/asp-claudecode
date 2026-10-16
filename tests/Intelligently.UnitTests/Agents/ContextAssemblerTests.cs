@@ -72,7 +72,7 @@ public class ContextAssemblerTests
         envelopes.Select(e => e.PrefixHash()).Distinct().Should().ContainSingle();
 
         envelopes.Should().OnlyContain(e => e.System.Count == 1 && e.System[0].CacheBreakpoint && e.System[0].Text == ContextAssembler.SystemPrompt);
-        envelopes.Should().OnlyContain(e => e.CacheTools && e.Tools.Count == 1 && e.Tools[0].Name == LookupKnowledgeTool.ToolName);
+        envelopes.Should().OnlyContain(e => e.CacheTools && e.Tools.Any(t => t.Name == LookupKnowledgeTool.ToolName));
         envelopes.Should().OnlyContain(e => e.RunId == run.Id && e.InputTokens > 0);
     }
 

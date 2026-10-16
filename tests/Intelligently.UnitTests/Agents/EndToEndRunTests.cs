@@ -77,7 +77,7 @@ public class EndToEndRunTests
         traces.Should().ContainSingle(t => t.Kind == AgentTrace.KindToolCall).Which.Payload.Should().Contain("\"decision\":\"Allow\"");
         traces.Where(t => t.Kind == AgentTrace.KindModelCall).Should().OnlyContain(t => t.Model == "claude-opus-5-5" && t.InputTokens == 120);
 
-        host.Engine.Verify(e => e.DecideAsync(It.Is<PromptEnvelope>(p => p.Tools.Count == 1 && p.Tools[0].Name == LookupKnowledgeTool.ToolName), It.IsAny<CancellationToken>()), Times.Once);
+        host.Engine.Verify(e => e.DecideAsync(It.Is<PromptEnvelope>(p => p.Tools.Any(t => t.Name == LookupKnowledgeTool.ToolName)), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

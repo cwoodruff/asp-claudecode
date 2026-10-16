@@ -30,6 +30,9 @@ public sealed class AgentWebFactory : WebApplicationFactory<Intelligently.Web.Ag
     public Mock<IReasoningEngine> Engine { get; } = new(MockBehavior.Strict);
     public StubDestructiveTool DestructiveTool { get; } = new();
 
+    /// <summary>Stands in for the Docker sandbox: every run_lab_code call prints "hi" and exits 0.</summary>
+    public FakeSandbox Sandbox { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -55,6 +58,8 @@ public sealed class AgentWebFactory : WebApplicationFactory<Intelligently.Web.Ag
             services.RemoveAll<IEpisodeSummarizer>();
             services.AddSingleton<IEpisodeSummarizer, ExtractiveSummarizer>();
             services.AddSingleton<IToolHandler>(DestructiveTool);
+            services.RemoveAll<ISandbox>();
+            services.AddSingleton<ISandbox>(Sandbox);
         });
     }
 

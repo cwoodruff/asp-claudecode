@@ -1,10 +1,14 @@
 using System.Text.Json;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Tools;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Intelligently.Infrastructure.Agents.Execution;
 
-/// <summary>ReadOnly native tool: scored retrieval over active <c>AIKnowledgeEntry</c> rows through the Context Plane retriever.</summary>
+/// <summary>
+/// ReadOnly native tool: scored retrieval over active <c>AIKnowledgeEntry</c> rows through the Context
+/// Plane retriever. Each execution opens its own scope so several lookups in one turn can run concurrently.
+/// </summary>
 public sealed class LookupKnowledgeTool : IToolHandler
 {
     public const string ToolName = "lookup_knowledge";
@@ -23,11 +27,11 @@ public sealed class LookupKnowledgeTool : IToolHandler
         additionalProperties = false,
     });
 
-    private readonly IKnowledgeRetriever _retriever;
+    private readonly IServiceScopeFactory _scopes;
 
-    public LookupKnowledgeTool(IKnowledgeRetriever retriever)
+    public LookupKnowledgeTool(IServiceScopeFactory scopes)
     {
-        _retriever = retriever;
+        _scopes = scopes;
     }
 
     public ToolDescriptor Descriptor { get; } = new(
@@ -37,7 +41,7 @@ public sealed class LookupKnowledgeTool : IToolHandler
         ToolRiskLevel.ReadOnly,
         CourseScopeArgument: "course_id");
 
-    public async Task<ToolResult> ExecuteAsync(ToolCall call, CancellationToken ct = default)
+    public async Task<ToolResult> ExecuteAsync(ToolCall call, ToolContext context, CancellationToken ct = default)
     {
         if (call.Input.ValueKind != JsonValueKind.Object ||
             !call.Input.TryGetProperty("query", out var queryElement) ||
@@ -51,7 +55,9 @@ public sealed class LookupKnowledgeTool : IToolHandler
         var courseId = IntegerArgument(call.Input, "course_id");
         var moduleId = IntegerArgument(call.Input, "module_id");
 
-        var matches = await _retriever.SearchAsync(query, courseId, moduleId, MaxResults, ct);
+        using var scope = _scopes.CreateScope();
+        var retriever = scope.ServiceProvider.GetRequiredService<IKnowledgeRetriever>();
+        var matches = await retriever.SearchAsync(query, courseId, moduleId, MaxResults, ct);
         var entries = matches.Select(m => new
         {
             id = m.Entry.Id,

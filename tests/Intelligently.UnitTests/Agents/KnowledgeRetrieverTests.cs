@@ -108,7 +108,7 @@ public class KnowledgeRetrieverTests
         handler.Descriptor.InputSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().Equal("query", "course_id", "module_id");
 
         var result = await handler.ExecuteAsync(new ToolCall("toolu_1", LookupKnowledgeTool.ToolName,
-            JsonSerializer.SerializeToElement(new { query = "CS0246", course_id = 7, module_id = 1 })));
+            JsonSerializer.SerializeToElement(new { query = "CS0246", course_id = 7, module_id = 1 })), StubTool.Context());
 
         result.IsError.Should().BeFalse();
         using var doc = JsonDocument.Parse(result.Content);
