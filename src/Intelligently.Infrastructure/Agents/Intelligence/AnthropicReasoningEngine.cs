@@ -1,78 +1,80 @@
 using System.Text.Json;
 using Anthropic;
-using Anthropic.Models.Messages;
+using Anthropic.Models.Beta.Messages;
 using Intelligently.Core.Agents;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.Tools;
 using Intelligently.Core.Exceptions;
+using Intelligently.Infrastructure.Agents.Context;
 using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents.Intelligence;
 
 /// <summary>
-/// Intelligence Plane on the official Anthropic SDK: structured output for plans and
-/// judgements, strict tools with <c>tool_choice: auto</c> for decisions, adaptive thinking throughout.
+/// Intelligence Plane on the official Anthropic SDK: structured output for plans and judgements, strict
+/// tools with <c>tool_choice: auto</c> for decisions, adaptive thinking throughout. The envelope is sent as
+/// assembled by the Context Plane (prefix, cached blocks and message order untouched); the tool list is
+/// sent on every call so the cached prefix is the same for every stage, with <c>tool_choice: none</c> where
+/// the call must answer in text. When the envelope asks for server-side compaction the beta header and
+/// context-management edit are added, and a <c>compaction</c> stop continues the turn with the full
+/// response content appended, so compaction blocks survive.
 /// </summary>
 public sealed class AnthropicReasoningEngine : IReasoningEngine
 {
     private const string RefusalStopReason = "refusal";
     private const string MaxTokensStopReason = "max_tokens";
+    private const string CompactionStopReason = "compaction";
     private const int MaxOutputTokens = 16_000;
+    private const int MaxCompactionContinuations = 2;
 
     private static readonly Dictionary<string, JsonElement> PlanSchema = AgentJsonSchema.ForDictionary<AgentPlan>();
     private static readonly Dictionary<string, JsonElement> JudgementSchema = AgentJsonSchema.ForDictionary<Judgement>();
 
     private readonly IAnthropicClient _client;
     private readonly AgentsOptions _options;
+    private readonly CacheHealthMonitor? _cacheHealth;
 
-    public AnthropicReasoningEngine(IAnthropicClient client, IOptions<AgentsOptions> options)
+    public AnthropicReasoningEngine(IAnthropicClient client, IOptions<AgentsOptions> options, CacheHealthMonitor? cacheHealth = null)
     {
         _client = client;
         _options = options.Value;
+        _cacheHealth = cacheHealth;
     }
 
     public async Task<PlanResult> PlanAsync(PromptEnvelope envelope, CancellationToken ct = default)
     {
-        var parameters = BuildParams(envelope, new OutputConfig
+        var outputConfig = new BetaOutputConfig
         {
             Effort = Effort.High,
-            Format = new JsonOutputFormat { Schema = PlanSchema },
-        });
+            Format = new BetaJsonOutputFormat { Schema = PlanSchema },
+        };
 
-        var message = await _client.Messages.Create(parameters, ct);
-        ThrowIfRefused(message);
+        var (message, usage, contentJson) = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceNone()), ct);
 
         var text = TextOf(message);
-        var usage = UsageOf(message);
         var raw = message.ToString() ?? text;
 
         if (message.StopReason == MaxTokensStopReason)
-            return new PlanResult(null, usage, raw, "Planner output was truncated at max_tokens.");
+            return new PlanResult(null, usage, raw, "Planner output was truncated at max_tokens.", contentJson);
 
         try
         {
             var plan = JsonSerializer.Deserialize<AgentPlan>(text, AgentJsonSchema.SerializerOptions);
             return plan is null
-                ? new PlanResult(null, usage, raw, "Planner returned an empty plan.")
-                : new PlanResult(plan, usage, raw);
+                ? new PlanResult(null, usage, raw, "Planner returned an empty plan.", contentJson)
+                : new PlanResult(plan, usage, raw, ContentJson: contentJson);
         }
         catch (JsonException ex)
         {
-            return new PlanResult(null, usage, raw, $"Planner output did not match the plan schema: {ex.Message}");
+            return new PlanResult(null, usage, raw, $"Planner output did not match the plan schema: {ex.Message}", contentJson);
         }
     }
 
     public async Task<DecisionResult> DecideAsync(PromptEnvelope envelope, CancellationToken ct = default)
     {
-        var parameters = BuildParams(
-            envelope,
-            new OutputConfig { Effort = Effort.Medium },
-            tools: envelope.Tools.Select(ToSdkTool).Select(t => (ToolUnion)t).ToList(),
-            toolChoice: new ToolChoiceAuto());
-
-        var message = await _client.Messages.Create(parameters, ct);
-        ThrowIfRefused(message);
+        var outputConfig = new BetaOutputConfig { Effort = Effort.Medium };
+        var (message, usage, contentJson) = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceAuto()), ct);
 
         var calls = new List<ToolCall>();
         var text = new List<string>();
@@ -88,59 +90,103 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
             calls,
             text.Count == 0 ? null : string.Concat(text),
             message.StopReason?.Raw() ?? "unknown",
-            UsageOf(message),
-            message.ToString() ?? string.Empty);
+            usage,
+            message.ToString() ?? string.Empty,
+            contentJson);
     }
 
     public async Task<JudgementResult> JudgeAsync(PromptEnvelope envelope, string rubric, CancellationToken ct = default)
     {
-        var messages = envelope.Messages
-            .Append(new PromptMessage("user", $"Judge the work above against this rubric and respond with JSON only.\nRubric:\n{rubric}"))
-            .ToList();
-        var parameters = BuildParams(envelope with { Messages = messages }, new OutputConfig
+        // The rubric is a user turn; it goes before the trailing stage instruction so that system message stays last.
+        var rubricMessage = new PromptMessage(PromptMessage.UserRole, $"Judge the work above against this rubric and respond with JSON only.\nRubric:\n{rubric}");
+        var messages = envelope.Messages.ToList();
+        if (messages.Count > 0 && messages[^1].IsSystem)
+            messages.Insert(messages.Count - 1, rubricMessage);
+        else
+            messages.Add(rubricMessage);
+        var judged = envelope with { Messages = messages };
+
+        var outputConfig = new BetaOutputConfig
         {
             Effort = Effort.High,
-            Format = new JsonOutputFormat { Schema = JudgementSchema },
-        });
-
-        var message = await _client.Messages.Create(parameters, ct);
-        ThrowIfRefused(message);
+            Format = new BetaJsonOutputFormat { Schema = JudgementSchema },
+        };
+        var (message, usage, _) = await CallAsync(judged, msgs => BuildParams(judged, msgs, outputConfig, new BetaToolChoiceNone()), ct);
 
         var text = TextOf(message);
         var judgement = JsonSerializer.Deserialize<Judgement>(text, AgentJsonSchema.SerializerOptions)
                         ?? new Judgement { Passed = false, Score = 0, Rationale = "Judge returned no verdict." };
-        return new JudgementResult(judgement.Passed, judgement.Score, judgement.Rationale, UsageOf(message), message.ToString() ?? text);
+        return new JudgementResult(judgement.Passed, judgement.Score, judgement.Rationale, usage, message.ToString() ?? text);
+    }
+
+    /// <summary>
+    /// One model turn. On a <c>compaction</c> stop the full response content is appended as an assistant
+    /// turn and the call is repeated, so the compaction block is what the model continues from. Returns the
+    /// final message, the summed usage and the JSON array of every response block in order.
+    /// </summary>
+    private async Task<(BetaMessage Message, ModelUsage Usage, string ContentJson)> CallAsync(
+        PromptEnvelope envelope,
+        Func<List<BetaMessageParam>, MessageCreateParams> build,
+        CancellationToken ct)
+    {
+        var messages = PromptEnvelopeMapper.Messages(envelope);
+        var blocks = new List<JsonElement>();
+        var prefixHash = envelope.PrefixHash();
+        ModelUsage? total = null;
+
+        for (var continuation = 0; ; continuation++)
+        {
+            var message = await _client.Beta.Messages.Create(build(messages), ct);
+            ThrowIfRefused(message);
+
+            var usage = UsageOf(message);
+            _cacheHealth?.Observe(envelope.RunId, prefixHash, usage, envelope.Stage);
+            total = total is null ? usage : Sum(total, usage);
+
+            var responseBlocks = message.Content.Select(b => b.Json.Clone()).ToList();
+            blocks.AddRange(responseBlocks);
+
+            if (message.StopReason == CompactionStopReason && continuation < MaxCompactionContinuations)
+            {
+                messages = [.. messages, PromptEnvelopeMapper.AssistantTurn(responseBlocks)];
+                continue;
+            }
+
+            return (message, total, JsonSerializer.Serialize(blocks));
+        }
     }
 
     private MessageCreateParams BuildParams(
         PromptEnvelope envelope,
-        OutputConfig outputConfig,
-        List<ToolUnion>? tools = null,
-        ToolChoice? toolChoice = null) => new()
+        List<BetaMessageParam> messages,
+        BetaOutputConfig outputConfig,
+        BetaToolChoice toolChoice)
     {
-        OutputConfig = outputConfig,
-        Tools = tools,
-        ToolChoice = toolChoice,
-        Model = _options.DefaultModel,
-        MaxTokens = MaxOutputTokens,
-        System = string.IsNullOrWhiteSpace(envelope.SystemPrompt) ? null : (MessageCreateParamsSystem)envelope.SystemPrompt,
-        Messages = envelope.Messages.Select(m => new MessageParam
+        var parameters = new MessageCreateParams
         {
-            Role = string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase) ? Role.Assistant : Role.User,
-            Content = m.Content,
-        }).ToList(),
-        Thinking = new ThinkingConfigAdaptive(),
-    };
+            Model = _options.DefaultModel,
+            MaxTokens = MaxOutputTokens,
+            Messages = messages,
+            OutputConfig = outputConfig,
+            Thinking = new BetaThinkingConfigAdaptive(),
+        };
+        // Optional fields are layered on through the copy constructor so absent ones are never serialized.
+        if (PromptEnvelopeMapper.CreateSystem(envelope) is { } system)
+            parameters = new MessageCreateParams(parameters) { System = system };
+        if (PromptEnvelopeMapper.Tools(envelope) is { } tools)
+            parameters = new MessageCreateParams(parameters) { Tools = tools, ToolChoice = toolChoice };
+        if (envelope.Compaction)
+        {
+            parameters = new MessageCreateParams(parameters)
+            {
+                ContextManagement = PromptEnvelopeMapper.ContextManagement(envelope, _options),
+                Betas = PromptEnvelopeMapper.Betas(envelope),
+            };
+        }
+        return parameters;
+    }
 
-    private static Tool ToSdkTool(ToolDescriptor descriptor) => new()
-    {
-        Name = descriptor.Name,
-        Description = descriptor.Description,
-        InputSchema = InputSchema.FromRawUnchecked(AgentJsonSchema.ToDictionary(descriptor.InputSchema)),
-        Strict = true,
-    };
-
-    private static void ThrowIfRefused(Message message)
+    private static void ThrowIfRefused(BetaMessage message)
     {
         if (message.StopReason == RefusalStopReason)
         {
@@ -149,15 +195,22 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
         }
     }
 
-    private static string TextOf(Message message) =>
-        string.Concat(message.Content.Select(b => b.Value).OfType<TextBlock>().Select(b => b.Text));
+    private static string TextOf(BetaMessage message) =>
+        string.Concat(message.Content.Select(b => b.Value).OfType<BetaTextBlock>().Select(b => b.Text));
 
-    private static ModelUsage UsageOf(Message message) => new(
+    private static ModelUsage UsageOf(BetaMessage message) => new(
         message.Model.Raw(),
         (int)message.Usage.InputTokens,
         (int)message.Usage.OutputTokens,
         (int)(message.Usage.CacheReadInputTokens ?? 0),
         (int)(message.Usage.CacheCreationInputTokens ?? 0));
+
+    private static ModelUsage Sum(ModelUsage a, ModelUsage b) => new(
+        a.Model,
+        a.InputTokens + b.InputTokens,
+        a.OutputTokens + b.OutputTokens,
+        a.CacheReadInputTokens + b.CacheReadInputTokens,
+        a.CacheCreationInputTokens + b.CacheCreationInputTokens);
 
     /// <summary>Structured-output contract for <see cref="JudgeAsync"/>.</summary>
     public sealed record Judgement

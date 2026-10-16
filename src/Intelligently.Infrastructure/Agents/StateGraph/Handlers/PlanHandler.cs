@@ -52,6 +52,7 @@ public sealed class PlanHandler : IStageHandler
             Revision = run.PlanRevision,
             Hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))),
             CreatedAt = DateTime.UtcNow,
+            ResponseContentJson = result.ContentJson,
         };
         _db.AgentPlans.Add(stored);
         run.CurrentStepIndex = 0;

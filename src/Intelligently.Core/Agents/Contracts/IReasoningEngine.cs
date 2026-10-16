@@ -3,19 +3,27 @@ using Intelligently.Core.Agents.Tools;
 
 namespace Intelligently.Core.Agents.Contracts;
 
-/// <summary>Result of <see cref="IReasoningEngine.PlanAsync"/>.</summary>
-public sealed record PlanResult(AgentPlan? Plan, ModelUsage Usage, string RawResponse, string? FailureReason = null)
+/// <summary>
+/// Result of <see cref="IReasoningEngine.PlanAsync"/>. <see cref="ContentJson"/> is the JSON array of the
+/// response content blocks exactly as the provider returned them, so the transcript can replay them.
+/// </summary>
+public sealed record PlanResult(AgentPlan? Plan, ModelUsage Usage, string RawResponse, string? FailureReason = null, string? ContentJson = null)
 {
     public bool Succeeded => Plan is not null;
 }
 
-/// <summary>Result of <see cref="IReasoningEngine.DecideAsync"/>.</summary>
+/// <summary>
+/// Result of <see cref="IReasoningEngine.DecideAsync"/>. <see cref="ContentJson"/> is the JSON array of the
+/// response content blocks exactly as the provider returned them (text, tool use, thinking, compaction),
+/// appended back to the transcript on later turns so signed blocks survive.
+/// </summary>
 public sealed record DecisionResult(
     IReadOnlyList<ToolCall> ToolCalls,
     string? AssistantText,
     string StopReason,
     ModelUsage Usage,
-    string RawResponse);
+    string RawResponse,
+    string? ContentJson = null);
 
 /// <summary>Result of <see cref="IReasoningEngine.JudgeAsync"/>.</summary>
 public sealed record JudgementResult(bool Passed, double Score, string Rationale, ModelUsage Usage, string RawResponse);

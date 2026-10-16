@@ -2,6 +2,7 @@ using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents;
+using Intelligently.Infrastructure.Agents.Context;
 using Intelligently.Infrastructure.Agents.StateGraph;
 using Intelligently.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
@@ -51,6 +52,8 @@ public sealed class AgentTestHost : IDisposable
         services.AddDbContext<IntelligentlyDbContext>(o => o.UseSqlite(Connection));
         services.AddAgentRuntime(configuration);
         services.AddSingleton(Engine.Object);          // replaces AnthropicReasoningEngine
+        services.AddSingleton<IPromptTokenCounter, EstimatingTokenCounter>();   // no provider call for counting
+        services.AddSingleton<IEpisodeSummarizer, ExtractiveSummarizer>();      // no provider call for episode summaries
         configure?.Invoke(services);
         return services.BuildServiceProvider();
     }

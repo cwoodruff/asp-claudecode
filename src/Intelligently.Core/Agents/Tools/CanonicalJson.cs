@@ -22,7 +22,8 @@ public static class CanonicalJson
     public static string Sha256(JsonElement element) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Serialize(element))));
 
-    private static void Write(Utf8JsonWriter writer, JsonElement element)
+    /// <summary>Writes <paramref name="element"/> in canonical form (sorted keys) to <paramref name="writer"/>.</summary>
+    public static void Write(Utf8JsonWriter writer, JsonElement element)
     {
         switch (element.ValueKind)
         {

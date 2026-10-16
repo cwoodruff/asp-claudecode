@@ -43,7 +43,15 @@ public static class AgentServiceCollectionExtensions
         // Intelligence Plane
         services.AddSingleton<IReasoningEngine, AnthropicReasoningEngine>();
 
-        // Context Plane
+        // Context Plane: retrieval and episodic memory on the scoped DbContext; counting, budgeting,
+        // compaction and cache health shared across scopes
+        services.AddSingleton<CacheHealthMonitor>();
+        services.AddSingleton<IPromptTokenCounter, AnthropicTokenCounter>();
+        services.AddSingleton<TokenBudgeter>();
+        services.AddSingleton<Compactor>();
+        services.AddSingleton<IEpisodeSummarizer>(sp => sp.GetRequiredService<Compactor>());
+        services.AddScoped<IKnowledgeRetriever, KnowledgeRetriever>();
+        services.AddScoped<IEpisodicMemoryStore, EpisodicMemoryStore>();
         services.AddScoped<IContextAssembler, ContextAssembler>();
 
         // Execution Plane

@@ -105,7 +105,9 @@ builder.Services.AddOpenTelemetry()
     })
     .WithMetrics(metrics =>
     {
-        metrics.AddAspNetCoreInstrumentation();
+        metrics
+            .AddMeter(AgentTelemetry.MeterName)
+            .AddAspNetCoreInstrumentation();
 
         if (builder.Environment.IsDevelopment())
             metrics.AddConsoleExporter();
