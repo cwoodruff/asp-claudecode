@@ -77,7 +77,7 @@ public class RunLabCodeEndpointTests : IClassFixture<AgentWebFactory>
 
         _factory.Sandbox.Requests.Should().HaveCount(before + 1);
         var request = _factory.Sandbox.Requests[^1];
-        request.Command.Should().Equal("dotnet", "run", "Program.cs");
+        request.Command.Should().Equal("dotnet", "run", "Program.cs", "-p:PublishAot=false");
         request.Files.Should().ContainSingle().Which.Content.Should().Contain("WriteLine");
 
         await _factory.WithDbAsync(async db =>

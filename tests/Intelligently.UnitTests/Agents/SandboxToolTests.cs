@@ -65,7 +65,7 @@ public class SandboxToolTests
         var output = await ExecuteAsync(host, LabCode.Call(expectedOutput: "hi"));
 
         sandbox.Requests.Should().ContainSingle();
-        sandbox.Requests[0].Command.Should().Equal("dotnet", "run", "Program.cs");
+        sandbox.Requests[0].Command.Should().Equal("dotnet", "run", "Program.cs", "-p:PublishAot=false");
         sandbox.Requests[0].Files.Should().ContainSingle().Which.Path.Should().Be("Program.cs");
         output.Succeeded.Should().BeTrue();
         output.ExitCode.Should().Be(0);
