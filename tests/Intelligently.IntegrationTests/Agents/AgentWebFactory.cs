@@ -1,4 +1,5 @@
 using Intelligently.Core.Agents.Contracts;
+using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -16,14 +17,17 @@ namespace Intelligently.IntegrationTests.Agents;
 /// <summary>
 /// Hosts Intelligently.Web in-process with a shared SQLite in-memory database and a mocked
 /// <see cref="IReasoningEngine"/>. The real RunWorker, StateGraphRunner, handlers, tools and
-/// policy run exactly as in production.
+/// policy run exactly as in production. A Destructive stub tool is added so the approval flow
+/// can be exercised. (The type parameter only names the entry assembly; both Web and Admin
+/// declare a <c>Program</c> class, so a Web type is used instead.)
 /// </summary>
-public sealed class AgentWebFactory : WebApplicationFactory<Program>
+public sealed class AgentWebFactory : WebApplicationFactory<Intelligently.Web.Agents.RunWorker>
 {
     private readonly string _connectionString = $"Data Source=file:agent-tests-{Guid.NewGuid():N}?mode=memory&cache=shared";
     private SqliteConnection? _keepAlive;
 
     public Mock<IReasoningEngine> Engine { get; } = new(MockBehavior.Strict);
+    public StubDestructiveTool DestructiveTool { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -45,6 +49,7 @@ public sealed class AgentWebFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IReasoningEngine>();
             services.AddSingleton(Engine.Object);
+            services.AddSingleton<IToolHandler>(DestructiveTool);
         });
     }
 

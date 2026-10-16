@@ -6,6 +6,7 @@ namespace Intelligently.Core.Agents.Entities;
 public sealed class AgentStep
 {
     public const string StatusRunning = "Running";
+    public const string StatusAwaitingApproval = "AwaitingApproval";
     public const string StatusObserved = "Observed";
     public const string StatusPassed = "Passed";
     public const string StatusFailed = "Failed";

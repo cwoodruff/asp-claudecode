@@ -1,6 +1,27 @@
+using Anthropic;
+using Intelligently.Infrastructure.Agents;
+using Intelligently.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Database: the same context Web uses, so approvals and traces are read from the same tables.
+builder.Services.AddDbContext<IntelligentlyDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Anthropic (official SDK): required by the agent runtime registrations even though Admin never plans or acts.
+builder.Services.AddSingleton<AnthropicClient>(_ =>
+{
+    var key = builder.Configuration["Anthropic:ApiKey"]
+              ?? throw new InvalidOperationException("Anthropic:ApiKey not configured");
+    return new AnthropicClient { ApiKey = key };
+});
+builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<AnthropicClient>());
+
+// Autonomous agent runtime: Admin uses the approval gate, the policy rules and the run queue.
+// There is no RunWorker here; the Web worker's approval sweep picks up runs decided in Admin.
+builder.Services.AddAgentRuntime(builder.Configuration);
+
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
@@ -24,3 +45,6 @@ app.MapRazorPages()
    .WithStaticAssets();
 
 app.Run();
+
+/// <summary>Exposed so integration tests can host the admin app with WebApplicationFactory.</summary>
+public partial class Program { }

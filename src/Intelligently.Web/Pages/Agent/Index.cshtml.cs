@@ -37,7 +37,7 @@ public sealed class IndexModel : PageModel
             return Page();
         }
 
-        var run = await _runs.CreateAsync(UserId.Trim(), CourseId, TaskType.Trim(), TaskSpec, ct);
+        var run = await _runs.CreateAsync(UserId.Trim(), CourseId, TaskType.Trim(), TaskSpec, ct: ct);
 
         if (Request.Headers.ContainsKey("HX-Request"))
             return Partial("_RunStatus", run);

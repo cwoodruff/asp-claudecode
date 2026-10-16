@@ -34,6 +34,9 @@ internal static class EngineStubs
         engine.Setup(e => e.PlanAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlanResult(null, Usage, "{}", reason));
 
+    public static DecisionResult Decision(params ToolCall[] calls) =>
+        new(calls, calls.Length == 0 ? "Here is my answer." : "Looking that up.", calls.Length == 0 ? "end_turn" : "tool_use", Usage, "{\"raw\":\"decision\"}");
+
     public static void DecideReturns(Mock<IReasoningEngine> engine, params ToolCall[] calls) =>
         engine.Setup(e => e.DecideAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DecisionResult(calls, calls.Length == 0 ? "Here is my answer." : "Looking that up.", calls.Length == 0 ? "end_turn" : "tool_use", Usage, "{\"raw\":\"decision\"}"));

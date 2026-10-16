@@ -22,7 +22,11 @@ public sealed class AgentRunService
         _options = options.Value;
     }
 
-    public async Task<AgentRun> CreateAsync(string userId, int courseId, string taskType, string taskSpec, CancellationToken ct = default)
+    /// <summary>
+    /// Creates a run acting as <paramref name="principal"/> (default: a learner enrolled in
+    /// <paramref name="courseId"/>) and enqueues it.
+    /// </summary>
+    public async Task<AgentRun> CreateAsync(string userId, int courseId, string taskType, string taskSpec, RunPrincipal? principal = null, CancellationToken ct = default)
     {
         var budgets = _options.Budgets;
         var run = new AgentRun
@@ -33,6 +37,7 @@ public sealed class AgentRunService
             TaskSpec = taskSpec,
             Stage = AgentStage.Interpret,
             Status = AgentRun.StatusRunning,
+            Principal = principal ?? RunPrincipal.Learner(userId, courseId),
             Budget = new RecoveryBudget
             {
                 ReplansLeft = budgets.ReplansLeft,

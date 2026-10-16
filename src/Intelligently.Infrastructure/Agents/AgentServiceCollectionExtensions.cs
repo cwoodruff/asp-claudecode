@@ -11,6 +11,7 @@ using Intelligently.Infrastructure.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents;
 
@@ -29,10 +30,11 @@ public static class AgentServiceCollectionExtensions
         services.AddScoped<StateGraphRunner>();
         services.AddScoped<AgentRunService>();
 
-        // Stage handlers (one per stage; AwaitingApproval is parked, not executed, until Phase 2)
+        // Stage handlers (one per stage, including the parked AwaitingApproval stage)
         services.AddScoped<IStageHandler, InterpretHandler>();
         services.AddScoped<IStageHandler, PlanHandler>();
         services.AddScoped<IStageHandler, ActHandler>();
+        services.AddScoped<IStageHandler, AwaitingApprovalHandler>();
         services.AddScoped<IStageHandler, ObserveHandler>();
         services.AddScoped<IStageHandler, VerifyHandler>();
         services.AddScoped<IStageHandler, RecoverHandler>();
@@ -49,8 +51,11 @@ public static class AgentServiceCollectionExtensions
         services.AddScoped<IToolRegistry, ToolRegistry>();
         services.AddScoped<IToolDispatcher, ToolDispatcher>();
 
-        // Control Plane
-        services.AddSingleton<IPolicyDecisionPoint, PolicyDecisionPoint>();
+        // Control Plane: rules from Agents:Policy, rate limiter shared across scopes, barrier and gate on the scoped DbContext
+        services.AddSingleton<IToolRateLimiter>(sp => new ToolRateLimiter(sp.GetRequiredService<IOptions<AgentsOptions>>()));
+        services.AddScoped<IIdempotencyBarrier, IdempotencyBarrier>();
+        services.AddScoped<IApprovalGate, ApprovalGate>();
+        services.AddScoped<IPolicyDecisionPoint, PolicyDecisionPoint>();
 
         // Evidence Plane
         services.AddScoped<IEvidenceSink, OtelEvidenceSink>();

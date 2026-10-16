@@ -1,3 +1,4 @@
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.StateGraph;
 
 namespace Intelligently.Core.Agents.Entities;
@@ -34,10 +35,13 @@ public sealed class AgentRun
     /// <summary>Index of the plan step currently being executed (0-based).</summary>
     public int CurrentStepIndex { get; set; }
 
-    /// <summary>Why the run entered Recover: <c>PlanFailed</c> or <c>StepFailed</c>.</summary>
+    /// <summary>Why the run entered Recover: <c>PlanFailed</c>, <c>StepFailed</c> or <c>PolicyDenied</c>.</summary>
     public string? RecoveryReason { get; set; }
 
     public RecoveryBudget Budget { get; set; } = new();
+
+    /// <summary>Identity the run acts under; every tool call is judged against it (plan section 1.4).</summary>
+    public RunPrincipal Principal { get; set; } = new();
 
     public int TotalInputTokens { get; set; }
     public int TotalOutputTokens { get; set; }
@@ -52,6 +56,10 @@ public sealed class AgentRun
     public ICollection<AgentStep> Steps { get; set; } = [];
     public ICollection<AgentPlan> Plans { get; set; } = [];
     public ICollection<AgentTrace> Traces { get; set; } = [];
+    public ICollection<AgentApproval> Approvals { get; set; } = [];
 
     public bool IsActive => Status == StatusRunning;
+
+    /// <summary>Parked at <see cref="AgentStage.AwaitingApproval"/> waiting for a human decision.</summary>
+    public bool IsWaitingForApproval => Stage == AgentStage.AwaitingApproval && Status == StatusWaiting;
 }

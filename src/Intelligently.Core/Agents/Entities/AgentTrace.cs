@@ -11,6 +11,7 @@ public sealed class AgentTrace
     public const string KindModelCall = "ModelCall";
     public const string KindToolCall = "ToolCall";
     public const string KindEscalation = "Escalation";
+    public const string KindApproval = "Approval";
     public const string KindNote = "Note";
 
     public long Id { get; set; }
@@ -18,7 +19,7 @@ public sealed class AgentTrace
     public Guid? StepId { get; set; }
     public AgentStage Stage { get; set; }
 
-    /// <summary>Transition | ModelCall | ToolCall | Escalation | Note.</summary>
+    /// <summary>Transition | ModelCall | ToolCall | Escalation | Approval | Note.</summary>
     public string Kind { get; set; } = KindNote;
 
     /// <summary>JSON payload: prompt envelope, raw response, tool payload, etc.</summary>
