@@ -78,6 +78,16 @@ public sealed class AgentTestHost : IDisposable
         return await scope.ServiceProvider.GetRequiredService<StateGraphRunner>().StepAsync(runId);
     }
 
+    /// <summary>Steps as a named worker instance, reporting whether the stage ran (lease tests simulate two workers this way).</summary>
+    public async Task<StepResult> TryStepAsync(Guid runId, string claimedBy)
+    {
+        using var scope = Provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<StateGraphRunner>().TryStepAsync(runId, claimedBy);
+    }
+
+    /// <summary>The id this host's runner claims runs under when <see cref="StepAsync"/> is used.</summary>
+    public string WorkerId => Provider.GetRequiredService<IWorkerIdentity>().Id;
+
     /// <summary>Steps until the run is no longer Running, returning the sequence of stages visited.</summary>
     public async Task<(AgentRun Run, List<AgentStage> Stages)> RunToEndAsync(Guid runId, int maxStages = 50)
     {

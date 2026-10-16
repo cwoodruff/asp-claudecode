@@ -27,6 +27,7 @@ public static class AgentServiceCollectionExtensions
 
         // Execution host
         services.AddSingleton<IRunQueue, RunQueue>();
+        services.AddSingleton<IWorkerIdentity, ProcessWorkerIdentity>();
         services.AddScoped<StateGraphRunner>();
         services.AddScoped<AgentRunService>();
 

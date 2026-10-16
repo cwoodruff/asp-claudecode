@@ -21,6 +21,12 @@ public sealed class AgentsOptions
     /// </summary>
     public int ApprovalSweepSeconds { get; set; } = 15;
 
+    /// <summary>
+    /// Length of the lease a worker takes on a run before executing one stage. It must exceed the longest
+    /// stage (model turn plus tool calls): once it expires another worker may take the run over.
+    /// </summary>
+    public int StageLeaseSeconds { get; set; } = 600;
+
     /// <summary>Control Plane rules, bound from <c>Agents:Policy</c>.</summary>
     public PolicyOptions Policy { get; set; } = new();
 

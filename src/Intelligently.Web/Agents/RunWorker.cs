@@ -20,8 +20,10 @@ namespace Intelligently.Web.Agents;
 /// the process died, and runs whose approval was decided in the Admin process (which has no
 /// worker). A sweep task re-enqueues every Running run at startup and, every
 /// <see cref="AgentsOptions.ApprovalSweepSeconds"/>, every run that is Running at AwaitingApproval
-/// (that is, decided but not yet picked up). Enqueuing a run twice is harmless: a step on a run
-/// that is no longer Running returns it untouched.
+/// (that is, decided but not yet picked up) or whose stage lease has expired (abandoned by a
+/// crashed worker). Enqueuing a run twice, here or on another instance, is harmless: every stage
+/// runs under a database lease taken as this worker's <see cref="IWorkerIdentity"/>, so a duplicate
+/// simply fails to claim the run and is dropped, and a run that is no longer Running is returned untouched.
 /// </remarks>
 public sealed class RunWorker : BackgroundService
 {
@@ -30,20 +32,25 @@ public sealed class RunWorker : BackgroundService
 
     private readonly IRunQueue _queue;
     private readonly IServiceScopeFactory _scopes;
+    private readonly IWorkerIdentity _identity;
     private readonly AgentsOptions _options;
     private readonly ILogger<RunWorker> _logger;
 
-    public RunWorker(IRunQueue queue, IServiceScopeFactory scopes, IOptions<AgentsOptions> options, ILogger<RunWorker> logger)
+    public RunWorker(IRunQueue queue, IServiceScopeFactory scopes, IWorkerIdentity identity, IOptions<AgentsOptions> options, ILogger<RunWorker> logger)
     {
         _queue = queue;
         _scopes = scopes;
+        _identity = identity;
         _options = options.Value;
         _logger = logger;
     }
 
+    /// <summary>Recorded as <c>AgentRun.ClaimedBy</c> on every stage this worker executes.</summary>
+    public string WorkerId => _identity.Id;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("RunWorker started");
+        _logger.LogInformation("RunWorker {WorkerId} started", WorkerId);
         var sweep = SweepAsync(stoppingToken);
         try
         {
@@ -68,10 +75,16 @@ public sealed class RunWorker : BackgroundService
             {
                 using var scope = _scopes.CreateScope();
                 var runner = scope.ServiceProvider.GetRequiredService<StateGraphRunner>();
-                var run = await runner.StepAsync(runId, ct);
+                var (run, executed) = await runner.TryStepAsync(runId, WorkerId, ct);
                 if (!run.IsActive)
                 {
                     _logger.LogInformation("Run {RunId} left the worker at {Stage} ({Status})", runId, run.Stage, run.Status);
+                    return;
+                }
+                if (!executed)
+                {
+                    // Another instance holds the lease (or a duplicate enqueue raced us); it will carry the run on.
+                    _logger.LogDebug("Run {RunId} is held by {Holder} until {Until:O}; dropping it here", runId, run.ClaimedBy, run.ClaimedUntil);
                     return;
                 }
             }
@@ -90,7 +103,7 @@ public sealed class RunWorker : BackgroundService
         _logger.LogWarning("Run {RunId} exceeded {Max} stages in one dequeue; parking it", runId, MaxStagesPerDequeue);
     }
 
-    /// <summary>Startup resume of every Running run, then a periodic sweep for decided approvals.</summary>
+    /// <summary>Startup resume of every Running run, then a periodic sweep for decided approvals and expired leases.</summary>
     private async Task SweepAsync(CancellationToken ct)
     {
         await Task.Yield();
@@ -103,7 +116,12 @@ public sealed class RunWorker : BackgroundService
         {
             using var timer = new PeriodicTimer(interval);
             while (await timer.WaitForNextTickAsync(ct))
-                await EnqueueAsync(r => r.Status == AgentRun.StatusRunning && r.Stage == AgentStage.AwaitingApproval, "approval sweep", ct);
+            {
+                var now = DateTime.UtcNow;
+                await EnqueueAsync(r => r.Status == AgentRun.StatusRunning
+                                        && (r.Stage == AgentStage.AwaitingApproval
+                                            || (r.ClaimedUntil != null && r.ClaimedUntil < now)), "approval and lease sweep", ct);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

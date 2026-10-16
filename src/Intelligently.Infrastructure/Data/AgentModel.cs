@@ -23,6 +23,9 @@ internal static class AgentModel
             e.Property(x => x.RecoveryReason).HasMaxLength(30);
             e.Property(x => x.TotalCostUsd).HasPrecision(12, 6);
             e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
+            // The lease expiry is a second concurrency token: a worker whose lease was taken over cannot commit its stale stage.
+            e.Property(x => x.ClaimedBy).HasMaxLength(200);
+            e.Property(x => x.ClaimedUntil).IsConcurrencyToken();
             e.Ignore(x => x.IsActive);
             e.Ignore(x => x.IsWaitingForApproval);
             e.HasIndex(x => new { x.Status, x.Stage });
