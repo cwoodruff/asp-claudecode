@@ -1,9 +1,15 @@
-﻿namespace Intelligently.Core.Entities.AI;
+namespace Intelligently.Core.Entities.AI;
 
 public class AIEscalation
 {
     public int Id { get; set; }
-    public Guid ConversationId { get; set; }
+
+    /// <summary>Chat conversation that raised the escalation; null when raised by an agent run.</summary>
+    public Guid? ConversationId { get; set; }
+
+    /// <summary>Agent run that raised the escalation; null when raised from chat.</summary>
+    public Guid? AgentRunId { get; set; }
+
     public long? MessageId { get; set; }
     public string UserId { get; set; } = string.Empty;
     public int CourseId { get; set; }
@@ -20,6 +26,6 @@ public class AIEscalation
     public DateTime? ResolvedAt { get; set; }
     public DateTime? NotifiedInstructorAt { get; set; }
     public DateTime? LearnerNotifiedAt { get; set; }
- 
-    public AIConversation Conversation { get; set; } = null!;
+
+    public AIConversation? Conversation { get; set; }
 }

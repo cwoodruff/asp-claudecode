@@ -2,7 +2,9 @@ using Anthropic;
 using Intelligently.Core.Interfaces;
 using Intelligently.Core.Telemetry;
 using Intelligently.Infrastructure.AI;
+using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Web.Agents;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -75,6 +77,10 @@ builder.Services.AddSingleton<AnthropicClient>(_ =>
 builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<AnthropicClient>());
 builder.Services.AddSingleton<IAnthropicService, AnthropicService>();
 
+// ── Autonomous agent runtime (five planes + state graph) and its execution host ──
+builder.Services.AddAgentRuntime(builder.Configuration);
+builder.Services.AddHostedService<RunWorker>();
+
 // ── OpenTelemetry (Evidence Plane) ────────────────────────────────────────────────
 // Console exporter in Development; OTLP (endpoint from Otel:Endpoint) everywhere else.
 var otlpEndpoint = builder.Configuration["Otel:Endpoint"];
@@ -130,5 +136,9 @@ app.UseAuthorization();
 app.MapStaticAssets();
 app.MapRazorPages()
    .WithStaticAssets();
+app.MapAgentEndpoints();
 
 app.Run();
+
+/// <summary>Exposed so integration tests can host the app with WebApplicationFactory.</summary>
+public partial class Program { }

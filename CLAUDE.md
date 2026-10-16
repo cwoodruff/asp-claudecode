@@ -50,6 +50,17 @@ Dependency flow: Web/Admin → Infrastructure → Core.
 - `Otel:Endpoint` — OTLP collector endpoint (non-Development only)
 - `Agents` — `DefaultModel`, `CheapModel`, `Budgets` (`ReplansLeft`, `RetriesLeft`, `ToolCallsLeft`, `TokensLeft`)
 
+## Autonomous Agent Runtime (Phase 1)
+
+Spec: `docs/autonomous-agent-plan.md` (five planes, seven-stage conditional state graph, transition table in section 2.2).
+
+- **Core/Agents** — `Contracts/` (IReasoningEngine, IContextAssembler, IToolDispatcher, IPolicyDecisionPoint, IEvidenceSink, IRunQueue), `Entities/` (AgentRun, AgentStep, AgentPlan, AgentTrace, AgentEpisode), `StateGraph/` (AgentStage, StageOutcome, StageTransitions table, RecoveryBudget owned type, IStageHandler), `Tools/` (ToolDescriptor, ToolCall, ToolResult, ToolRiskLevel, IToolHandler, IToolRegistry), `AgentsOptions`.
+- **Infrastructure/Agents** — `StateGraph/StateGraphRunner` executes one stage per `StepAsync`, rejects any edge not in `StageTransitions`, commits after every stage; `StateGraph/Handlers/` one handler per stage; `RunQueue` (bounded `Channel<Guid>`); `Intelligence/AnthropicReasoningEngine` (structured output from the `AgentPlan` record schema, strict tools + `tool_choice: auto`, adaptive thinking); `Execution/` (ToolRegistry, ToolDispatcher, `lookup_knowledge`); `Control/PolicyDecisionPoint` (Phase 1: ReadOnly allowed, everything else denied); `Evidence/OtelEvidenceSink` (spans + append-only AgentTrace rows); `Context/ContextAssembler` (stub). Register everything with `services.AddAgentRuntime(configuration)`.
+- **Web** — `POST /agent/runs` (JSON, minimal API), `GET /agent/runs/{id}` (Razor page; returns the `_RunStatus` htmx partial when the `HX-Request` header is present), `/agent` demo form, `RunWorker` background service.
+- **AIEscalation** now has a nullable `ConversationId` and an `AgentRunId` so agent runs can escalate without a chat conversation.
+- Migrations live in `src/Intelligently.Infrastructure/Data/Migrations`; add one with `dotnet ef migrations add <Name> --project src/Intelligently.Infrastructure --startup-project src/Intelligently.Infrastructure --output-dir Data/Migrations` (a design-time factory supplies the context).
+- Tests: `tests/Intelligently.UnitTests/Agents` run the real runtime on SQLite in-memory with a mocked `IReasoningEngine`; `tests/Intelligently.IntegrationTests/Agents` hosts the Web app with `WebApplicationFactory` the same way.
+
 ## Testing Stack
 
-xUnit, Moq, FluentAssertions, coverlet for coverage.
+xUnit, Moq, FluentAssertions, coverlet for coverage. Agent tests use `Microsoft.EntityFrameworkCore.Sqlite` (in-memory) and `Microsoft.AspNetCore.Mvc.Testing`.

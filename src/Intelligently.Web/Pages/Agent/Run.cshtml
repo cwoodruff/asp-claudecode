@@ -1,0 +1,8 @@
+@page "/agent/runs/{id:guid}"
+@model Intelligently.Web.Pages.Agent.RunModel
+@{
+    ViewData["Title"] = "Agent run";
+}
+<h1>Agent run</h1>
+<partial name="_RunStatus" model="Model.Run" />
+<p><a href="/agent">Start another run</a></p>

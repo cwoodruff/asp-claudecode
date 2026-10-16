@@ -1,0 +1,21 @@
+@page "/agent"
+@model Intelligently.Web.Pages.Agent.IndexModel
+@{
+    ViewData["Title"] = "Agent";
+}
+<h1>Start an agent run</h1>
+<form method="post" hx-post="/agent" hx-target="#run-status" hx-swap="innerHTML">
+    <label>User id <input name="UserId" value="@Model.UserId" required /></label>
+    <label>Course id <input name="CourseId" type="number" value="@Model.CourseId" required /></label>
+    <label>Task type <input name="TaskType" value="@Model.TaskType" required /></label>
+    <label>Task spec (JSON)
+        <textarea name="TaskSpec" rows="6" cols="80" required>@Model.TaskSpec</textarea>
+    </label>
+    <button type="submit">Run</button>
+</form>
+<div id="run-status">
+    @if (Model.Error is not null)
+    {
+        <p class="text-danger">@Model.Error</p>
+    }
+</div>
