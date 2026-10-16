@@ -31,11 +31,18 @@ public sealed class PlanHandler : IStageHandler
 
     public async Task<StageOutcome> ExecuteAsync(AgentRun run, CancellationToken ct = default)
     {
+        // A spent hard budget stops the run before any further model work; Recover escalates.
+        if (run.Budget.IsExhausted)
+            return Exhausted(run, "before planning");
+
         var envelope = await _context.BuildAsync(run, Stage, ct);
         var result = await _engine.PlanAsync(envelope, ct);
 
         UsageAccounting.Apply(run, result.Usage);
         await _evidence.RecordAsync(run, UsageAccounting.ModelCallTrace(Stage, envelope, result.Usage, result.RawResponse), ct);
+
+        if (run.Budget.IsExhausted)
+            return Exhausted(run, "after the planner call");
 
         if (!result.Succeeded)
             return Recover(run, result.FailureReason ?? "Planner produced no plan.");
@@ -65,6 +72,14 @@ public sealed class PlanHandler : IStageHandler
     {
         run.RecoveryReason = RecoveryReasons.PlanFailed;
         return StageOutcome.To(AgentStage.Recover, reason);
+    }
+
+    private static StageOutcome Exhausted(AgentRun run, string when)
+    {
+        var budget = run.Budget;
+        run.RecoveryReason = RecoveryReasons.BudgetExhausted;
+        return StageOutcome.To(AgentStage.Recover,
+            $"Hard budget exhausted {when} (tokens {budget.TokensLeft}, tool calls {budget.ToolCallsLeft}, wall clock {budget.WallClockLeft}); no further model work.");
     }
 
     private string? Validate(AgentPlan plan)

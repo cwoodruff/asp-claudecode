@@ -22,7 +22,7 @@ public sealed class StubDestructiveTool : IToolHandler
 
     public int Executions => _executions;
 
-    public Task<ToolResult> ExecuteAsync(ToolCall call, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(ToolCall call, ToolContext context, CancellationToken ct = default)
     {
         Interlocked.Increment(ref _executions);
         return Task.FromResult(ToolResult.Ok(call, "{\"deleted\":true}"));

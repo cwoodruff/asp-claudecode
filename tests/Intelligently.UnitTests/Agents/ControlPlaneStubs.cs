@@ -30,12 +30,16 @@ public sealed class StubTool : IToolHandler
     public int Executions { get; private set; }
     public List<ToolCall> Calls { get; } = [];
 
-    public Task<ToolResult> ExecuteAsync(ToolCall call, CancellationToken ct = default)
+    public Task<ToolResult> ExecuteAsync(ToolCall call, ToolContext context, CancellationToken ct = default)
     {
         Executions++;
         Calls.Add(call);
         return Task.FromResult(_execute?.Invoke(call) ?? ToolResult.Ok(call, $"{{\"executed\":{Executions}}}"));
     }
+
+    /// <summary>A tool context for a learner run in course 7, for calling handlers directly.</summary>
+    public static ToolContext Context(string userId = "learner-1", int courseId = 7, string taskType = "LabErrorDiagnosis") =>
+        new(Guid.NewGuid(), userId, courseId, taskType, RunPrincipal.Learner(userId, courseId));
 
     public static ToolCall Call(string tool, int? courseId, string text = "hello", string id = "toolu_stub") =>
         new(id, tool, JsonSerializer.SerializeToElement(new { course_id = courseId, text }));

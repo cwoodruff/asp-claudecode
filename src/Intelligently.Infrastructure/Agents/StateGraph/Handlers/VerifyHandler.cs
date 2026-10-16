@@ -59,6 +59,15 @@ public sealed class VerifyHandler : IStageHandler
 
         if (run.CurrentStepIndex + 1 < plan.Steps.Count)
         {
+            // The step passed, but the next one would call the model; a spent hard budget ends the run here.
+            if (run.Budget.IsExhausted)
+            {
+                var budget = run.Budget;
+                run.RecoveryReason = RecoveryReasons.BudgetExhausted;
+                return StageOutcome.To(AgentStage.Recover,
+                    $"Step {planStep.Index} passed but the hard budget is exhausted (tokens {budget.TokensLeft}, tool calls {budget.ToolCallsLeft}, wall clock {budget.WallClockLeft}); {plan.Steps.Count - run.CurrentStepIndex - 1} step(s) not run.");
+            }
+
             run.CurrentStepIndex++;
             return StageOutcome.To(AgentStage.Act, $"Step {planStep.Index} passed; {plan.Steps.Count - run.CurrentStepIndex} step(s) remain.");
         }
