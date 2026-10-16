@@ -5,6 +5,7 @@ using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Agents.Control;
+using Intelligently.Infrastructure.Agents.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -47,7 +48,7 @@ public class PolicyDecisionPointTests
     {
         var options = new AgentsOptions();
         if (rules is not null) options.Policy.Rules = rules.ToList();
-        return new PolicyDecisionPoint(Options.Create(options), _rateLimiter.Object, _barrier.Object, _approvals.Object, NullLogger<PolicyDecisionPoint>.Instance);
+        return new PolicyDecisionPoint(Options.Create(options), _rateLimiter.Object, _barrier.Object, _approvals.Object, new TaskTypeRegistry([new LabErrorDiagnosisContract()]), NullLogger<PolicyDecisionPoint>.Instance);
     }
 
     private static AgentRun Run(RunPrincipal? principal, int courseId = 7) => new()

@@ -75,7 +75,7 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
         {
             courseId = 7,
             taskType = "LabErrorDiagnosis",
-            taskSpec = new { question = "My build fails with CS0246." },
+            taskSpec = TestSpecs.LabSpec(courseId: 7),
         });
 
         created.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -108,7 +108,7 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
         var client = _factory.CreateClient().AsLearner("learner-2", 7);
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { question = "q" },
+            courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = TestSpecs.LabSpec(courseId: 7),
         });
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 

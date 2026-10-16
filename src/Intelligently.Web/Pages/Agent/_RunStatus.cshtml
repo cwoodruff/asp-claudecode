@@ -4,6 +4,7 @@
 @{
     // Keep polling while the run is active or parked for approval, so a decision made in Admin shows up here.
     var polling = Model.Status is AgentRun.StatusRunning or AgentRun.StatusWaiting;
+    var showOutcome = Model.Status == AgentRun.StatusCompleted && !string.IsNullOrWhiteSpace(Model.FinalExplanation);
 }
 <div id="run-@Model.Id" class="agent-run agent-run-@Model.Status.ToLowerInvariant()"
      @if (polling) { <text>hx-get="/agent/runs/@Model.Id" hx-trigger="every 2s" hx-swap="outerHTML"</text> }>
@@ -27,4 +28,23 @@
             <dt>Finished</dt><dd>@Model.CompletedAt.Value.ToString("u")</dd>
         }
     </dl>
+    @if (showOutcome)
+    {
+        <section class="agent-run-outcome" data-explanation>
+            <h2>What went wrong, and the fix</h2>
+            <p class="agent-run-explanation" style="white-space: pre-wrap">@Model.FinalExplanation</p>
+            @if (!string.IsNullOrWhiteSpace(Model.FixDiff))
+            {
+                <details open>
+                    <summary>Proposed fix to your files</summary>
+                    @* WebUtility encoding keeps "+" and "-" readable in the diff; Razor's default encoder would escape them. *@
+                    <pre class="agent-run-diff" data-fix-diff><code>@Html.Raw(System.Net.WebUtility.HtmlEncode(Model.FixDiff))</code></pre>
+                </details>
+            }
+            else
+            {
+                <p class="agent-run-diff-none" data-fix-diff-none>No changes to your files were needed.</p>
+            }
+        </section>
+    }
 </div>

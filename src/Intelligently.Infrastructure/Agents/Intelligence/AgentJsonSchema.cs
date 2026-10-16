@@ -10,7 +10,8 @@ namespace Intelligently.Infrastructure.Agents.Intelligence;
 /// Exports JSON Schema from the C# contract records so one type defines the
 /// structured-output format, the tool input schema and the deserialization target.
 /// Objects are closed (<c>additionalProperties: false</c>) with every property
-/// required, as strict tools and structured outputs expect.
+/// required, as strict tools and structured outputs expect. A task spec, which a client posts rather
+/// than the model, is exported with <c>requireAll: false</c>: only non-nullable properties are required.
 /// </summary>
 public static class AgentJsonSchema
 {
@@ -25,10 +26,13 @@ public static class AgentJsonSchema
         TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
     };
 
-    private static readonly JsonSchemaExporterOptions ExporterOptions = new()
+    private static readonly JsonSchemaExporterOptions ExporterOptions = Exporter(requireAll: true);
+    private static readonly JsonSchemaExporterOptions OptionalExporterOptions = Exporter(requireAll: false);
+
+    private static JsonSchemaExporterOptions Exporter(bool requireAll) => new()
     {
         TreatNullObliviousAsNonNullable = true,
-        TransformSchemaNode = static (context, schema) =>
+        TransformSchemaNode = (context, schema) =>
         {
             if (schema is not JsonObject obj) return schema;
 
@@ -45,16 +49,26 @@ public static class AgentJsonSchema
             if (obj["properties"] is JsonObject properties)
             {
                 obj["additionalProperties"] = false;
-                obj["required"] = new JsonArray(properties.Select(p => (JsonNode)p.Key).ToArray());
+                obj["required"] = new JsonArray(properties
+                    .Where(p => requireAll || !IsNullable(p.Value))
+                    .Select(p => (JsonNode)p.Key)
+                    .ToArray());
             }
 
             return obj;
         },
     };
 
-    /// <summary>Schema for <typeparamref name="T"/> as a mutable node tree.</summary>
-    public static JsonNode ForNode<T>() =>
-        SerializerOptions.GetJsonSchemaAsNode(typeof(T), ExporterOptions);
+    /// <summary>True when a property schema admits null (<c>type: [..., "null"]</c>), which makes it optional in a task spec.</summary>
+    private static bool IsNullable(JsonNode? property) =>
+        property is JsonObject o && o["type"] is JsonArray types && types.Any(t => t is JsonValue v && v.TryGetValue<string>(out var s) && s == "null");
+
+    /// <summary>
+    /// Schema for <typeparamref name="T"/> as a mutable node tree. With <paramref name="requireAll"/> false
+    /// only non-nullable properties are required (task specs); the default requires every property (tools, structured outputs).
+    /// </summary>
+    public static JsonNode ForNode<T>(bool requireAll = true) =>
+        SerializerOptions.GetJsonSchemaAsNode(typeof(T), requireAll ? ExporterOptions : OptionalExporterOptions);
 
     /// <summary>Schema for <typeparamref name="T"/> as the raw dictionary the SDK accepts.</summary>
     public static Dictionary<string, JsonElement> ForDictionary<T>() => ToDictionary(ForNode<T>());

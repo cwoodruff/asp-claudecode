@@ -77,6 +77,11 @@ internal static class StepQueries
             .OrderByDescending(p => p.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
+    public static IReadOnlyList<ToolCall> Calls(AgentStep step) =>
+        string.IsNullOrWhiteSpace(step.ToolCallsJson)
+            ? []
+            : JsonSerializer.Deserialize<List<ToolCall>>(step.ToolCallsJson) ?? [];
+
     public static IReadOnlyList<ToolResult> Results(AgentStep step) =>
         string.IsNullOrWhiteSpace(step.ToolResultsJson)
             ? []

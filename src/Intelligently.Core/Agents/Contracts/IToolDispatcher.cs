@@ -5,13 +5,15 @@ namespace Intelligently.Core.Agents.Contracts;
 
 /// <summary>
 /// Outcome of dispatching the tool calls of one assistant turn. When <see cref="RequiresApproval"/>
-/// is set nothing was executed and <see cref="PendingCall"/> is the call that needs a human.
+/// is set nothing was executed, <see cref="PendingCall"/> is the call that needs a human and
+/// <see cref="Decision"/> names the rule that asked.
 /// </summary>
 public sealed record DispatchResult(
     IReadOnlyList<ToolResult> Results,
     bool RequiresApproval,
     string? ApprovalReason = null,
-    ToolCall? PendingCall = null);
+    ToolCall? PendingCall = null,
+    PolicyDecision? Decision = null);
 
 /// <summary>
 /// Execution Plane entry point. Never runs a tool directly: asks the Control Plane

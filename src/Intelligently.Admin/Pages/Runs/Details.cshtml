@@ -52,6 +52,17 @@
         <summary>Task spec</summary>
         <pre>@Pretty(Model.Run.TaskSpec)</pre>
     </details>
+    @if (!string.IsNullOrWhiteSpace(Model.Run.FinalExplanation))
+    {
+        <details open data-learner-output>
+            <summary>Learner-facing output</summary>
+            <p style="white-space: pre-wrap">@Model.Run.FinalExplanation</p>
+            @if (!string.IsNullOrWhiteSpace(Model.Run.FixDiff))
+            {
+                <pre data-fix-diff>@Html.Raw(System.Net.WebUtility.HtmlEncode(Model.Run.FixDiff))</pre>
+            }
+        </details>
+    }
 </section>
 
 <section id="plans">

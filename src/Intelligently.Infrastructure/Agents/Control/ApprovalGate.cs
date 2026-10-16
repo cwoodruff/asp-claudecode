@@ -32,7 +32,7 @@ public sealed class ApprovalGate : IApprovalGate
         _logger = logger;
     }
 
-    public async Task<AgentApproval> RequestAsync(AgentRun run, AgentStep step, ToolCall call, string reason, CancellationToken ct = default)
+    public async Task<AgentApproval> RequestAsync(AgentRun run, AgentStep step, ToolCall call, string reason, CancellationToken ct = default, PolicyDecision? decision = null)
     {
         var arguments = CanonicalJson.Serialize(call.Input);
         var escalation = new AIEscalation
@@ -56,6 +56,8 @@ public sealed class ApprovalGate : IApprovalGate
             ToolCallJson = JsonSerializer.Serialize(call),
             ArgsHash = CanonicalJson.Sha256(call.Input),
             Reason = reason,
+            RuleKind = decision?.RuleKind?.ToString(),
+            Rule = decision?.Rule,
             Status = AgentApproval.StatusPending,
             Escalation = escalation,
         };
@@ -73,6 +75,8 @@ public sealed class ApprovalGate : IApprovalGate
                 tool = call.Name,
                 arguments = call.Input,
                 reason,
+                ruleKind = approval.RuleKind,
+                rule = approval.Rule,
             }),
         }, ct);
 

@@ -23,7 +23,8 @@ public class AgentJsonSchemaTests
 
         var step = properties["steps"]!["items"]!.AsObject();
         step["additionalProperties"]!.GetValue<bool>().Should().BeFalse();
-        step["required"]!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo("index", "description", "tool", "success_criteria");
+        step["required"]!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo("index", "description", "tool", "success_criteria", "phase");
+        step["properties"]!["phase"]!["type"]!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo("string", "null");
         step["properties"]!["tool"]!["type"]!.AsArray().Select(n => n!.GetValue<string>()).Should().BeEquivalentTo("string", "null");
         step["properties"]!["index"]!["type"]!.GetValue<string>().Should().Be("integer");
     }
@@ -31,7 +32,7 @@ public class AgentJsonSchemaTests
     [Fact]
     public void Plan_round_trips_through_the_same_serializer_options()
     {
-        var json = """{"goal":"g","steps":[{"index":0,"description":"d","tool":null,"success_criteria":"s"}]}""";
+        var json = """{"goal":"g","steps":[{"index":0,"description":"d","tool":null,"success_criteria":"s","phase":null}]}""";
 
         var plan = JsonSerializer.Deserialize<AgentPlan>(json, AgentJsonSchema.SerializerOptions)!;
 

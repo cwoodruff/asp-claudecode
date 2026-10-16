@@ -62,7 +62,7 @@ public class LearnStageTests
         var episode = episodes.Should().ContainSingle().Subject;
         episode.Outcome.Should().Be(AgentRun.StatusCompleted);
         episode.UserId.Should().Be("learner-1");
-        episode.TaskText.Should().Be("LabErrorDiagnosis CS0246 on build");
+        episode.TaskText.Should().StartWith("LabErrorDiagnosis").And.Contain("CS0246", "the task text is the task type followed by the spec's text values");
         episode.ToolUsageJson.Should().Be("""{"lookup_knowledge":1}""");
         episode.KnowledgeEntryId.Should().BeNull("nothing has been marked reusable yet");
         run.StatusReason.Should().Contain($"Episode {episode.Id}");

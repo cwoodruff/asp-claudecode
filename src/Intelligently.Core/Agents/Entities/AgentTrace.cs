@@ -15,13 +15,17 @@ public sealed class AgentTrace
     public const string KindEscalation = "Escalation";
     public const string KindApproval = "Approval";
     public const string KindNote = "Note";
+    /// <summary>A model judgement of a step (Verify): score, pass/fail and rationale.</summary>
+    public const string KindJudgement = "Judgement";
+    /// <summary>One plan candidate of a candidate search (Plan): the plan, its score and whether it was kept.</summary>
+    public const string KindCandidate = "Candidate";
 
     public long Id { get; set; }
     public Guid RunId { get; set; }
     public Guid? StepId { get; set; }
     public AgentStage Stage { get; set; }
 
-    /// <summary>Transition | ModelCall | ToolCall | SandboxLog | Escalation | Approval | Note.</summary>
+    /// <summary>Transition | ModelCall | ToolCall | SandboxLog | Escalation | Approval | Note | Judgement | Candidate.</summary>
     public string Kind { get; set; } = KindNote;
 
     /// <summary>JSON payload: the exact prompt envelope and raw response of a model call, a tool call with its payload, sandbox logs, etc.</summary>

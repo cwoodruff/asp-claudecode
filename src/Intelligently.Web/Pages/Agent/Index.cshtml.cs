@@ -23,7 +23,26 @@ public sealed class IndexModel : PageModel
 
     [BindProperty] public int CourseId { get; set; } = 1;
     [BindProperty] public string TaskType { get; set; } = "LabErrorDiagnosis";
-    [BindProperty] public string TaskSpec { get; set; } = """{ "question": "My build fails with CS0246. What does it mean?" }""";
+    [BindProperty] public string TaskSpec { get; set; } = DefaultLabSpecFor(1);
+
+    /// <summary>A LabErrorDiagnosis spec the demo form starts with: one learner file, the compiler error, no expected output, for the given course.</summary>
+    public static string DefaultLabSpecFor(int courseId) => DefaultLabSpecTemplate.Replace("{course_id}", courseId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    private const string DefaultLabSpecTemplate = """
+        {
+          "course_id": {course_id},
+          "module_id": 3,
+          "language": "csharp",
+          "learner_files": [
+            { "path": "Program.cs", "content": "using System;\nusing Newtonsoft.Json;\n\nConsole.WriteLine(JsonConvert.SerializeObject(new { ok = true }));\n" }
+          ],
+          "course_files": [],
+          "entrypoint": "Program.cs",
+          "error_text": "error CS0246: The type or namespace name 'Newtonsoft' could not be found",
+          "expected_output": null,
+          "learner_level": "Beginner"
+        }
+        """;
     public string? Error { get; private set; }
 
     /// <summary>The caller's enrolled courses, shown so the demo picks a course the run may act in.</summary>
@@ -34,6 +53,8 @@ public sealed class IndexModel : PageModel
         EnrolledCourses = User.GetEnrolledCourseIds();
         if (EnrolledCourses.Count > 0 && !EnrolledCourses.Contains(CourseId))
             CourseId = EnrolledCourses[0];
+        // The default spec must name the course the run will act in; a spec the learner typed is left alone (POST binds it).
+        TaskSpec = DefaultLabSpecFor(CourseId);
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
