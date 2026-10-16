@@ -4,6 +4,7 @@ using Intelligently.Core.Telemetry;
 using Intelligently.Infrastructure.AI;
 using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
 using Intelligently.Web.Agents;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
@@ -18,6 +19,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Database
 builder.Services.AddDbContext<IntelligentlyDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// ── Authentication & authorization ────────────────────────────────────────────────
+// ASP.NET Core Identity (cookie) over the same DbContext. Every agent route requires an
+// authenticated caller; the RunPrincipal a run acts under comes from the caller's claims only.
+builder.Services.AddIntelligentlyIdentity();
  
 // ── Rate Limiting (built-in ASP.NET Core 10, zero NuGet packages) ─────────────────
 // Uses PartitionedRateLimiter so each authenticated user gets their OWN independent
@@ -25,20 +31,26 @@ builder.Services.AddDbContext<IntelligentlyDbContext>(options =>
 // The 'chat' named policy is applied only to /chat/* endpoints via .RequireRateLimiting.
 builder.Services.AddRateLimiter(options =>
 {
-    // Named sliding-window policy — applied explicitly to chat endpoints only
-    options.AddSlidingWindowLimiter(policyName: "chat", opt =>
-    {
-        opt.PermitLimit           = 10;                       // 10 messages...
-        opt.Window                = TimeSpan.FromMinutes(1);  // ...per 60-second window
-        opt.SegmentsPerWindow     = 6;                        // window divided into 6 x 10s buckets
-        opt.QueueProcessingOrder  = QueueProcessingOrder.OldestFirst;
-        opt.QueueLimit            = 2;                        // queue up to 2 extra before rejecting
-    });
+    // Named sliding-window policy — applied explicitly to chat and agent-run endpoints only.
+    // Partitioned by the authenticated user id (IP for the anonymous paths), so each learner has
+    // their own window; a single AddSlidingWindowLimiter would be one window shared by everyone.
+    options.AddPolicy("chat", ctx =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                AutoReplenishment     = true,
+                PermitLimit           = 10,                       // 10 messages...
+                Window                = TimeSpan.FromMinutes(1),  // ...per 60-second window
+                SegmentsPerWindow     = 6,                        // window divided into 6 x 10s buckets
+                QueueProcessingOrder  = QueueProcessingOrder.OldestFirst,
+                QueueLimit            = 2,                        // queue up to 2 extra before rejecting
+            }));
  
     // Global limiter — per authenticated user, protects ALL endpoints as a backstop
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            partitionKey: ctx.User.GetUserId() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
@@ -61,8 +73,8 @@ builder.Services.AddRateLimiter(options =>
  
 // ── Middleware pipeline order (rate limiter MUST come after UseRouting) ────────────
 // app.UseRouting();
-// app.UseRateLimiter();   // <-- after routing, before endpoints
-// app.UseAuthentication();
+// app.UseAuthentication(); // <-- before the limiter, so partitions see the signed-in user
+// app.UseRateLimiter();    // <-- after routing, before endpoints
 // app.UseAuthorization();
 // app.MapRazorPages();
  
@@ -132,6 +144,7 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseRouting();
+app.UseAuthentication();   // before the limiter: its partitions are keyed by the signed-in user
 app.UseRateLimiter();      // after routing, before endpoints (see note above)
 app.UseAuthorization();
 

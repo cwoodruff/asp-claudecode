@@ -92,7 +92,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
     public async Task Approvals_page_lists_pending_calls_with_tool_arguments_and_reason()
     {
         var (run, _, approval) = await SeedParkedRunAsync("learner-list");
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsInstructor("instructor-1");
 
         var response = await client.GetAsync("/approvals");
 
@@ -111,7 +111,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
     public async Task Approving_through_the_page_records_the_decision_and_hands_the_run_back_to_a_worker()
     {
         var (run, step, approval) = await SeedParkedRunAsync("learner-approve");
-        var client = _factory.CreateClient(new() { HandleCookies = true });
+        var client = _factory.CreateClient(new() { HandleCookies = true }).AsInstructor("instructor-1");
         var page = await client.GetAsync("/approvals");
         var (token, _) = ExtractAntiforgery(page, await page.Content.ReadAsStringAsync());
 
@@ -130,7 +130,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var row = await response.Content.ReadAsStringAsync();
         row.Should().Contain("data-approval-status=\"Approved\"");
-        row.Should().Contain("by admin");
+        row.Should().Contain("by instructor-1");
         row.Should().Contain("Fine by me.");
         row.Should().NotContain("hx-post", "a decided row has no buttons");
 
@@ -138,7 +138,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
         {
             var decided = await db.AgentApprovals.SingleAsync(a => a.Id == approval.Id);
             decided.Status.Should().Be(AgentApproval.StatusApproved);
-            decided.DecidedBy.Should().Be("admin");
+            decided.DecidedBy.Should().Be("instructor-1");
             decided.DecisionNote.Should().Be("Fine by me.");
 
             var resumed = await db.AgentRuns.SingleAsync(r => r.Id == run.Id);
@@ -154,7 +154,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
     public async Task Denying_through_the_page_marks_the_approval_denied()
     {
         var (run, _, approval) = await SeedParkedRunAsync("learner-deny");
-        var client = _factory.CreateClient(new() { HandleCookies = true });
+        var client = _factory.CreateClient(new() { HandleCookies = true }).AsInstructor("instructor-1");
         var page = await client.GetAsync("/approvals");
         var (token, _) = ExtractAntiforgery(page, await page.Content.ReadAsStringAsync());
 
@@ -190,7 +190,7 @@ public class AdminPagesTests : IClassFixture<AdminWebFactory>
     public async Task Run_page_shows_the_run_its_steps_and_its_traces_in_order()
     {
         var (run, step, approval) = await SeedParkedRunAsync("learner-trace");
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsInstructor("instructor-1");
 
         var html = await client.GetStringAsync($"/runs/{run.Id}");
 

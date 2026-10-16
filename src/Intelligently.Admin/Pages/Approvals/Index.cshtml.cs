@@ -1,5 +1,7 @@
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
+using Intelligently.Infrastructure.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
@@ -9,7 +11,9 @@ namespace Intelligently.Admin.Pages.Approvals;
 /// /approvals: the Control Plane approval queue. Lists pending <see cref="AgentApproval"/> rows
 /// and records approve/deny decisions through the <see cref="IApprovalGate"/>, which resumes the run.
 /// htmx posts swap the decided row in place; a plain post redirects back to the list.
+/// Instructors only; the decision is recorded under the signed-in user's name.
 /// </summary>
+[Authorize(Policy = AgentAuthorization.InstructorPolicy)]
 public sealed class IndexModel : PageModel
 {
     private readonly IApprovalGate _gate;
@@ -34,9 +38,8 @@ public sealed class IndexModel : PageModel
 
     private async Task<IActionResult> DecideAsync(Guid id, bool approved, string? note, CancellationToken ct)
     {
-        var decidedBy = User.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(User.Identity.Name)
-            ? User.Identity.Name
-            : "admin";
+        var decidedBy = User.GetDisplayName();
+        if (decidedBy is null) return Challenge();
 
         AgentApproval approval;
         try

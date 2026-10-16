@@ -1,9 +1,11 @@
-using Intelligently.Core.Agents.Contracts;
-using Intelligently.Infrastructure.Agents.StateGraph;
 using Anthropic;
+using Intelligently.Admin.Agents;
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,10 +23,14 @@ builder.Services.AddSingleton<AnthropicClient>(_ =>
 builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<AnthropicClient>());
 
 // Autonomous agent runtime: Admin uses the approval gate and the policy rules. There is no RunWorker
-// here, so the bounded in-process queue is replaced by one that never blocks or fills; the Web
-// worker's approval sweep picks up runs decided in Admin.
+// here, so the bounded in-process RunQueue is replaced: nothing would drain it, and a full channel would
+// block the approval handler. The Web worker's approval sweep picks up runs decided in Admin instead.
 builder.Services.AddAgentRuntime(builder.Configuration);
-builder.Services.AddSingleton<IRunQueue, NoWorkerRunQueue>();
+builder.Services.Replace(ServiceDescriptor.Singleton<IRunQueue, NoWorkerRunQueue>());
+
+// Authentication & authorization: Identity (cookie) over the same DbContext. /approvals, /runs and
+// /runs/{id} require the "Instructor" policy; decisions are recorded under the signed-in user's name.
+builder.Services.AddIntelligentlyIdentity();
 
 builder.Services.AddRazorPages();
 
@@ -42,6 +48,7 @@ app.UseHttpsRedirection();
 
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
