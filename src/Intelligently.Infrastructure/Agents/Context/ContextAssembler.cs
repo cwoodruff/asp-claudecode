@@ -68,7 +68,7 @@ public sealed class ContextAssembler : IContextAssembler
             messages.Add(KnowledgeMessage(knowledge));
 
         // 4. Episodic summary of earlier runs for this learner and task type.
-        var episodes = await _episodes.RecallAsync(run.UserId, run.TaskType, taskText, _options.Context.Episodes, ct);
+        var episodes = await _episodes.RecallAsync(run.UserId, run.CourseId, run.TaskType, taskText, _options.Context.Episodes, ct);
         if (episodes.Count > 0)
             messages.Add(EpisodicMessage(episodes));
 

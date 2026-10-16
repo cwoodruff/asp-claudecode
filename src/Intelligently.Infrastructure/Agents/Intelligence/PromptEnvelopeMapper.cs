@@ -52,7 +52,7 @@ public static class PromptEnvelopeMapper
                 Name = descriptor.Name,
                 Description = descriptor.Description,
                 InputSchema = InputSchema.FromRawUnchecked(AgentJsonSchema.ToDictionary(descriptor.InputSchema)),
-                Strict = true,
+                Strict = descriptor.Strict,
                 CacheControl = envelope.CacheTools && last ? new BetaCacheControlEphemeral() : null,
             });
         }

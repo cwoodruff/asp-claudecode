@@ -33,6 +33,107 @@ public sealed class AgentsOptions
     /// <summary>Context Plane settings, bound from <c>Agents:Context</c>.</summary>
     public ContextOptions Context { get; set; } = new();
 
+    /// <summary>MCP tool servers, bound from <c>Agents:Mcp</c>.</summary>
+    public McpOptions Mcp { get; set; } = new();
+
+    /// <summary>Sandbox settings, bound from <c>Agents:Sandbox</c>.</summary>
+    public SandboxOptions Sandbox { get; set; } = new();
+
+    public sealed class McpOptions
+    {
+        /// <summary>Servers to connect to at startup; a server that fails to connect is logged and skipped.</summary>
+        public List<McpServerOptions> Servers { get; set; } = [];
+
+        /// <summary>
+        /// Risk level per tool, keyed by the registered name (<c>server__tool</c>) or the bare tool name.
+        /// Tools without an override are <see cref="Tools.ToolRiskLevel.External"/>.
+        /// </summary>
+        public Dictionary<string, Tools.ToolRiskLevel> RiskOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Separator between the server name and the tool name in the registered name. The provider only
+        /// accepts <c>[A-Za-z0-9_-]</c> in tool names, so a dot is not an option.
+        /// </summary>
+        public string NameSeparator { get; set; } = "__";
+
+        public int ConnectTimeoutSeconds { get; set; } = 30;
+        public int CallTimeoutSeconds { get; set; } = 120;
+    }
+
+    public sealed class McpServerOptions
+    {
+        public const string StdioTransport = "stdio";
+        public const string HttpTransport = "http";
+
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary><c>stdio</c> (command + args) or <c>http</c> (url).</summary>
+        public string Transport { get; set; } = StdioTransport;
+
+        public string? Command { get; set; }
+        public List<string> Args { get; set; } = [];
+        public string? WorkingDirectory { get; set; }
+        public Dictionary<string, string> Environment { get; set; } = new();
+
+        public string? Url { get; set; }
+        public Dictionary<string, string> Headers { get; set; } = new();
+
+        public bool IsStdio => string.Equals(Transport, StdioTransport, StringComparison.OrdinalIgnoreCase);
+        public bool IsHttp => string.Equals(Transport, HttpTransport, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public sealed class SandboxOptions
+    {
+        /// <summary>Container image for lab code; the .NET SDK image runs C# and F# scripts out of the box.</summary>
+        public string Image { get; set; } = "mcr.microsoft.com/dotnet/sdk:10.0";
+
+        /// <summary>Docker engine endpoint; null uses the platform default (named pipe on Windows, Unix socket elsewhere).</summary>
+        public string? DockerEndpoint { get; set; }
+
+        /// <summary>Pull the image when it is not present locally.</summary>
+        public bool PullImage { get; set; } = true;
+
+        public int TimeoutSeconds { get; set; } = 60;
+        public long MemoryBytes { get; set; } = 512L * 1024 * 1024;
+        public double Cpus { get; set; } = 1.0;
+        public int PidsLimit { get; set; } = 256;
+
+        /// <summary>Cap on captured stdout and stderr, each, in bytes.</summary>
+        public int MaxOutputBytes { get; set; } = 64 * 1024;
+
+        /// <summary>Path inside the container where the submitted files are mounted and the command runs.</summary>
+        public string WorkingDirectory { get; set; } = "/work";
+
+        /// <summary>
+        /// Command template per language for <c>run_lab_code</c>; <c>{entrypoint}</c> is replaced by the
+        /// submitted entrypoint path. Keys are case-insensitive.
+        /// </summary>
+        public Dictionary<string, string[]> Languages { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["csharp"] = ["dotnet", "run", "{entrypoint}"],
+            ["csproj"] = ["dotnet", "run", "--project", "{entrypoint}"],
+            ["fsharp"] = ["dotnet", "fsi", "{entrypoint}"],
+            ["shell"] = ["sh", "{entrypoint}"],
+            ["python"] = ["python3", "{entrypoint}"],
+        };
+
+        public WasmOptions Wasm { get; set; } = new();
+    }
+
+    public sealed class WasmOptions
+    {
+        /// <summary>Fuel (roughly, instructions) a module may consume before it is stopped.</summary>
+        public long Fuel { get; set; } = 2_000_000_000;
+
+        /// <summary>Linear memory cap for the module.</summary>
+        public long MemoryBytes { get; set; } = 64L * 1024 * 1024;
+
+        /// <summary>Wall-clock limit, enforced with epoch interruption.</summary>
+        public int TimeoutSeconds { get; set; } = 10;
+
+        public int MaxOutputBytes { get; set; } = 64 * 1024;
+    }
+
     public sealed class PolicyOptions
     {
         /// <summary>Ordered rules; when empty, <see cref="Contracts.PolicyRule.Defaults"/> apply.</summary>

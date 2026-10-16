@@ -7,6 +7,7 @@ using Intelligently.Core.Agents.Tools;
 using Intelligently.Core.Entities.AI;
 using Intelligently.Infrastructure.Agents.Execution;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 
 namespace Intelligently.UnitTests.Agents;
@@ -77,7 +78,7 @@ public class EndToEndRunTests
         traces.Should().ContainSingle(t => t.Kind == AgentTrace.KindToolCall).Which.Payload.Should().Contain("\"decision\":\"Allow\"");
         traces.Where(t => t.Kind == AgentTrace.KindModelCall).Should().OnlyContain(t => t.Model == "claude-opus-5-5" && t.InputTokens == 120);
 
-        host.Engine.Verify(e => e.DecideAsync(It.Is<PromptEnvelope>(p => p.Tools.Count == 1 && p.Tools[0].Name == LookupKnowledgeTool.ToolName), It.IsAny<CancellationToken>()), Times.Once);
+        host.Engine.Verify(e => e.DecideAsync(It.Is<PromptEnvelope>(p => p.Tools.Any(t => t.Name == LookupKnowledgeTool.ToolName)), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -159,5 +160,59 @@ public class EndToEndRunTests
 
         verified.Stage.Should().Be(AgentStage.Recover);
         verified.StatusReason.Should().Contain("Unknown tool");
+    }
+
+    [Fact]
+    public async Task Cache_read_and_creation_tokens_count_toward_input_usage_and_the_token_budget()
+    {
+        using var host = new AgentTestHost();
+        await SeedKnowledgeAsync(host);
+        host.Engine.Setup(e => e.PlanAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlanResult(EngineStubs.LookupPlan(), new ModelUsage("claude-opus-5-5", 120, 40, CacheReadInputTokens: 1000, CacheCreationInputTokens: 500), "{}"));
+        EngineStubs.DecideReturns(host.Engine, EngineStubs.LookupCall("CS0246"));
+
+        var run = await host.CreateRunAsync();
+        var (final, _) = await host.RunToEndAsync(run.Id);
+
+        final.Status.Should().Be(AgentRun.StatusCompleted);
+        final.TotalInputTokens.Should().Be(120 + 1000 + 500 + 120, "cached reads and cache creation are part of the processed prompt");
+        final.TotalOutputTokens.Should().Be(80);
+        final.Budget.TokensLeft.Should().Be(300_000 - (1620 + 40) - (120 + 40));
+    }
+
+    [Fact]
+    public async Task Exhausted_token_budget_after_planning_escalates_without_calling_the_model_again()
+    {
+        using var host = new AgentTestHost(s => s.Configure<Intelligently.Core.Agents.AgentsOptions>(o => o.Budgets.TokensLeft = 150));
+        EngineStubs.PlanReturns(host.Engine, EngineStubs.LookupPlan());   // 160 tokens: the plan call spends the whole budget
+
+        var run = await host.CreateRunAsync();
+        var (final, stages) = await host.RunToEndAsync(run.Id);
+
+        stages.Should().Equal(AgentStage.Interpret, AgentStage.Plan, AgentStage.Recover, AgentStage.Failed);
+        final.Status.Should().Be(AgentRun.StatusFailed);
+        final.Budget.TokensLeft.Should().Be(0);
+        final.StatusReason.Should().Contain("budget exhausted");
+        host.Engine.Verify(e => e.DecideAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()), Times.Never, "Act must not run on a spent budget");
+        (await host.QueryAsync(db => db.AIEscalations.CountAsync(e => e.AgentRunId == run.Id))).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Exhausted_budget_after_a_passing_step_escalates_instead_of_running_the_next_step()
+    {
+        using var host = new AgentTestHost(s => s.Configure<Intelligently.Core.Agents.AgentsOptions>(o => o.Budgets.TokensLeft = 300));
+        await SeedKnowledgeAsync(host);
+        EngineStubs.PlanReturns(host.Engine, StubTool.PlanFor(LookupKnowledgeTool.ToolName, steps: 2));   // Plan 160 + Act 160 > 300
+        EngineStubs.DecideReturns(host.Engine, EngineStubs.LookupCall("CS0246"));
+
+        var run = await host.CreateRunAsync();
+        var (final, stages) = await host.RunToEndAsync(run.Id);
+
+        stages.Should().Equal(AgentStage.Interpret, AgentStage.Plan, AgentStage.Act, AgentStage.Observe, AgentStage.Verify, AgentStage.Recover, AgentStage.Failed);
+        final.Status.Should().Be(AgentRun.StatusFailed);
+        final.StatusReason.Should().Contain("1 step(s) not run");
+        host.Engine.Verify(e => e.DecideAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()), Times.Once);
+        var step = await host.QueryAsync(db => db.AgentSteps.SingleAsync(s => s.RunId == run.Id));
+        step.Status.Should().Be(AgentStep.StatusPassed, "the step itself passed; only the budget stopped the run");
     }
 }

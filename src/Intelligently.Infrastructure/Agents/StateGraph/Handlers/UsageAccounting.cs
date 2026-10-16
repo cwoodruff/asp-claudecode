@@ -8,11 +8,17 @@ namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 /// <summary>Shared helpers for charging model usage to a run and recording it as evidence.</summary>
 internal static class UsageAccounting
 {
+    /// <summary>
+    /// Charges a model call to the run. The provider reports cached reads and cache creation separately
+    /// from <c>input_tokens</c>, so all three make up the prompt that was processed and all three count
+    /// toward the run's input total and its token budget.
+    /// </summary>
     public static void Apply(AgentRun run, ModelUsage usage)
     {
-        run.TotalInputTokens += usage.InputTokens;
+        var input = usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens;
+        run.TotalInputTokens += input;
         run.TotalOutputTokens += usage.OutputTokens;
-        run.Budget.TrySpendTokens(usage.InputTokens + usage.OutputTokens);
+        run.Budget.TrySpendTokens(input + usage.OutputTokens);
     }
 
     /// <summary>

@@ -42,15 +42,15 @@ public sealed class EpisodicMemoryStore : IEpisodicMemoryStore
         return Task.FromResult(episode);
     }
 
-    public async Task<IReadOnlyList<EpisodeMatch>> RecallAsync(string userId, string taskType, string taskText, int limit, CancellationToken ct = default)
+    public async Task<IReadOnlyList<EpisodeMatch>> RecallAsync(string userId, int courseId, string taskType, string taskText, int limit, CancellationToken ct = default)
     {
         if (limit <= 0) return [];
 
-        // Most recent episodes of the task type across learners; similarity is scored in memory so the
-        // same query works on SQL Server and SQLite.
+        // Most recent episodes of the task type within the course, across its learners; similarity is
+        // scored in memory so the same query works on SQL Server and SQLite.
         var candidates = await _db.AgentEpisodes
             .AsNoTracking()
-            .Where(e => e.TaskType == taskType)
+            .Where(e => e.TaskType == taskType && e.CourseId == courseId)
             .OrderByDescending(e => e.CreatedAt)
             .ThenBy(e => e.Id)
             .Take(Math.Max(limit, _options.Context.EpisodeCandidates))

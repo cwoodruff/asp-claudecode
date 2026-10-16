@@ -6,6 +6,7 @@ using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,12 +16,18 @@ namespace Intelligently.Infrastructure.Agents.StateGraph;
 /// Drives one run through the 7-stage conditional state graph one stage at a time.
 /// Every call executes exactly one stage handler, validates the returned edge
 /// against <see cref="StageTransitions"/>, and commits, so a crash or restart
-/// resumes from the last committed stage.
+/// resumes from the last committed stage. The whole stage runs inside one database
+/// transaction: rows a handler or an exclusive tool saves mid-stage (an escalation, an
+/// idempotency receipt) become visible together with the transition, never without it.
 /// </summary>
 /// <remarks>
-/// Stage execution is exclusive across worker instances. Before the handler runs the run is
-/// claimed with a single conditional UPDATE that only succeeds while the run is Running and
-/// unclaimed (or its lease has expired); a failed claim returns without executing anything.
+/// The whole stage runs inside one database transaction: rows a handler or an exclusive tool saves
+/// mid-stage (an escalation, an idempotency receipt) become visible together with the transition,
+/// never without it.
+/// Stage execution is exclusive across worker instances. Before the handler runs (and before the
+/// stage transaction opens, so other instances see it at once) the run is claimed with a single
+/// auto-committed conditional UPDATE that only succeeds while the run is Running and unclaimed
+/// (or its lease has expired); a failed claim returns without executing anything.
 /// The claim is released by the commit (success or failure) or, when nothing could be committed,
 /// by a best-effort conditional release, and an expired lease can be taken over by any worker.
 /// <c>ClaimedUntil</c> is also a concurrency token, so a worker whose lease was taken over cannot
@@ -115,6 +122,7 @@ public sealed class StateGraphRunner
 
         using var span = _evidence.StartStage(run, from);
         var stopwatch = Stopwatch.StartNew();
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
 
         StageOutcome outcome;
         try
@@ -124,7 +132,7 @@ public sealed class StateGraphRunner
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Run {RunId}: unhandled error in stage {Stage}", run.Id, from);
-            await FailAsync(run, from, $"Unhandled error in {from}: {ex.Message}", ct);
+            await FailAsync(run, from, $"Unhandled error in {from}: {ex.Message}", transaction, ct);
             throw;
         }
 
@@ -132,7 +140,7 @@ public sealed class StateGraphRunner
         {
             var illegal = new IllegalStageTransitionException(run.Id, from, outcome.Next);
             _logger.LogError(illegal, "Run {RunId}: handler for {Stage} returned an illegal transition", run.Id, from);
-            await FailAsync(run, from, illegal.Message, ct);
+            await FailAsync(run, from, illegal.Message, transaction, ct);
             throw illegal;
         }
 
@@ -157,7 +165,7 @@ public sealed class StateGraphRunner
         span?.SetTag("agent.next_stage", outcome.Next.ToString());
         span?.SetTag("agent.status", run.Status);
 
-        await CommitAsync(run, ct);
+        await CommitAsync(run, transaction, ct);
 
         _logger.LogInformation("Run {RunId}: {From} → {To} ({Reason})", run.Id, from, outcome.Next, outcome.Reason);
         return true;
@@ -178,7 +186,7 @@ public sealed class StateGraphRunner
             run.CompletedAt = DateTime.UtcNow;
     }
 
-    private async Task FailAsync(AgentRun run, AgentStage from, string reason, CancellationToken ct)
+    private async Task FailAsync(AgentRun run, AgentStage from, string reason, IDbContextTransaction transaction, CancellationToken ct)
     {
         run.Stage = AgentStage.Failed;
         run.Status = AgentRun.StatusFailed;
@@ -190,16 +198,20 @@ public sealed class StateGraphRunner
             Kind = AgentTrace.KindNote,
             Payload = JsonSerializer.Serialize(new { error = reason }),
         }, ct);
-        await CommitAsync(run, ct);
+        await CommitAsync(run, transaction, ct);
     }
 
-    /// <summary>Commits the stage and releases the lease in the same statement, guarded by both concurrency tokens.</summary>
-    private Task CommitAsync(AgentRun run, CancellationToken ct)
+    /// <summary>
+    /// Commits the stage and releases the lease in the same statement, guarded by both concurrency tokens,
+    /// then commits the stage transaction.
+    /// </summary>
+    private async Task CommitAsync(AgentRun run, IDbContextTransaction transaction, CancellationToken ct)
     {
         run.ConcurrencyStamp = Guid.NewGuid();
         run.ClaimedBy = null;
         run.ClaimedUntil = null;
-        return _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     /// <summary>

@@ -6,6 +6,8 @@ using Intelligently.Infrastructure.Agents.Context;
 using Intelligently.Infrastructure.Agents.Control;
 using Intelligently.Infrastructure.Agents.Evidence;
 using Intelligently.Infrastructure.Agents.Execution;
+using Intelligently.Infrastructure.Agents.Execution.Mcp;
+using Intelligently.Infrastructure.Agents.Execution.Sandboxes;
 using Intelligently.Infrastructure.Agents.Intelligence;
 using Intelligently.Infrastructure.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents.StateGraph.Handlers;
@@ -55,8 +57,20 @@ public static class AgentServiceCollectionExtensions
         services.AddScoped<IEpisodicMemoryStore, EpisodicMemoryStore>();
         services.AddScoped<IContextAssembler, ContextAssembler>();
 
-        // Execution Plane
+        // Execution Plane: native tools (each opens its own scope when it needs the DbContext, so the
+        // calls of one turn can run concurrently), sandboxes, MCP servers connected at host start
         services.AddScoped<IToolHandler, LookupKnowledgeTool>();
+        services.AddScoped<IToolHandler, RunLabCodeTool>();
+        services.AddScoped<IToolHandler, CreateEscalationTool>();
+        services.AddScoped<IToolHandler, NotifyLearnerTool>();
+        services.AddSingleton<DockerSandbox>();
+        services.AddSingleton<WasmSandbox>();
+        services.AddSingleton<ISandbox>(sp => sp.GetRequiredService<DockerSandbox>());
+        services.AddSingleton<IMcpTransportFactory, ConfiguredMcpTransportFactory>();
+        services.AddSingleton<McpToolSource>();
+        services.AddSingleton<IToolSource>(sp => sp.GetRequiredService<McpToolSource>());
+        services.AddHostedService<McpToolSourceHostedService>();
+        services.AddSingleton<ToolOutputValidator>();
         services.AddScoped<IToolRegistry, ToolRegistry>();
         services.AddScoped<IToolDispatcher, ToolDispatcher>();
 

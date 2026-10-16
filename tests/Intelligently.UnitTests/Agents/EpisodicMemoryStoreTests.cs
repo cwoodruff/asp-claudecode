@@ -31,10 +31,10 @@ public class EpisodicMemoryStoreTests
         return episode;
     }
 
-    private static async Task<IReadOnlyList<EpisodeMatch>> RecallAsync(AgentTestHost host, string userId, string taskText, int limit = 10)
+    private static async Task<IReadOnlyList<EpisodeMatch>> RecallAsync(AgentTestHost host, string userId, string taskText, int limit = 10, int courseId = 7)
     {
         using var scope = host.Provider.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<IEpisodicMemoryStore>().RecallAsync(userId, "LabErrorDiagnosis", taskText, limit);
+        return await scope.ServiceProvider.GetRequiredService<IEpisodicMemoryStore>().RecallAsync(userId, courseId, "LabErrorDiagnosis", taskText, limit);
     }
 
     [Fact]
@@ -111,6 +111,22 @@ public class EpisodicMemoryStoreTests
 
         (await RecallAsync(host, "learner-1", "LabErrorDiagnosis CS0246 on build in lab 3", limit: 1))
             .Should().ContainSingle().Which.Episode.Summary.Should().Be("this learner, close match");
+    }
+
+    [Fact]
+    public async Task Episodes_of_other_courses_are_never_recalled_even_for_the_same_learner()
+    {
+        using var host = new AgentTestHost();
+        var now = DateTime.UtcNow;
+        await WriteAsync(host, Run("learner-1", "CS0246 on build", courseId: 8), "same learner, other course", now);
+        await WriteAsync(host, Run("learner-2", "CS0246 on build", courseId: 8), "other learner, other course", now);
+        await WriteAsync(host, Run("learner-2", "CS0246 on build", courseId: 7), "other learner, this course", now.AddDays(-1));
+
+        var matches = await RecallAsync(host, "learner-1", "LabErrorDiagnosis CS0246 on build", courseId: 7);
+
+        matches.Select(m => m.Episode.Summary).Should().Equal("other learner, this course");
+        (await RecallAsync(host, "learner-1", "LabErrorDiagnosis CS0246 on build", courseId: 8))
+            .Select(m => m.Episode.Summary).Should().Equal("same learner, other course", "other learner, other course");
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
@@ -19,6 +20,9 @@ public static class AgentJsonSchema
         PropertyNameCaseInsensitive = true,
         // Web defaults allow numbers-as-strings, which would export int as ["string","integer"].
         NumberHandling = JsonNumberHandling.Strict,
+        // The exporter marks the options read-only; without an explicit resolver that throws when the
+        // first use of the options is a schema export rather than a (de)serialization.
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
     };
 
     private static readonly JsonSchemaExporterOptions ExporterOptions = new()
@@ -30,6 +34,13 @@ public static class AgentJsonSchema
 
             // Drop the "$schema" keyword the exporter adds at the root; the API does not want it.
             obj.Remove("$schema");
+
+            // The exporter ignores [Description]; copy it from the property so the model sees it.
+            if (context.PropertyInfo?.AttributeProvider?.GetCustomAttributes(typeof(DescriptionAttribute), inherit: true)
+                    .OfType<DescriptionAttribute>().FirstOrDefault() is { } description && !obj.ContainsKey("description"))
+            {
+                obj["description"] = description.Description;
+            }
 
             if (obj["properties"] is JsonObject properties)
             {

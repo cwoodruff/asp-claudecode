@@ -159,27 +159,26 @@ public class RunLeaseTests
     [Fact]
     public async Task A_worker_whose_lease_was_taken_over_cannot_commit_its_stale_stage()
     {
-        var handler = new BlockingHandler(AgentStage.Interpret, AgentStage.Plan, blockFirstCallOnly: true);
+        var handler = new BlockingHandler(AgentStage.Interpret, AgentStage.Plan);
         using var host = HostWith(handler);
         var run = await host.CreateRunAsync();
 
         var slow = host.TryStepAsync(run.Id, "slow-worker");
         await handler.Entered.Task;
 
-        // The slow worker's lease runs out while it is still inside the handler, and another worker takes the run over.
-        await SetLeaseAsync(host, run.Id, "slow-worker", DateTime.UtcNow.AddMinutes(-1));
-        var takeover = await host.TryStepAsync(run.Id, "fresh-worker");
-        takeover.Executed.Should().BeTrue();
-        takeover.Run.Stage.Should().Be(AgentStage.Plan);
+        // The slow worker's lease runs out while it is still inside the handler and a fresh worker claims the run.
+        // (The claim is applied directly: the stage transaction is BEGIN IMMEDIATE on the test host's single SQLite
+        // connection, so a second stage cannot be in flight here the way it can on SQL Server.)
+        await SetLeaseAsync(host, run.Id, "fresh-worker", DateTime.UtcNow.AddMinutes(10));
 
         handler.Release.SetResult();
         var act = () => slow;
-        await act.Should().ThrowAsync<DbUpdateConcurrencyException>("the stale stage must not be committed twice");
+        await act.Should().ThrowAsync<DbUpdateConcurrencyException>("ClaimedUntil changed under the slow worker, so its commit must be rejected");
 
         var persisted = await host.LoadAsync(run.Id);
-        persisted.Stage.Should().Be(AgentStage.Plan);
-        persisted.ClaimedBy.Should().BeNull("the fresh worker's commit released the lease and the stale release must not clear someone else's");
-        (await host.QueryAsync(db => db.AgentTraces.CountAsync(t => t.RunId == run.Id && t.Kind == AgentTrace.KindTransition))).Should().Be(1);
+        persisted.Stage.Should().Be(AgentStage.Interpret, "the stale transition was not committed");
+        persisted.ClaimedBy.Should().NotBe("slow-worker");
+        (await host.QueryAsync(db => db.AgentTraces.CountAsync(t => t.RunId == run.Id && t.Kind == AgentTrace.KindTransition))).Should().Be(0);
     }
 
     [Fact]
@@ -207,13 +206,11 @@ public class RunLeaseTests
     private sealed class BlockingHandler : IStageHandler
     {
         private readonly AgentStage _next;
-        private readonly bool _blockFirstCallOnly;
 
-        public BlockingHandler(AgentStage stage, AgentStage next, bool blockFirstCallOnly = false)
+        public BlockingHandler(AgentStage stage, AgentStage next)
         {
             Stage = stage;
             _next = next;
-            _blockFirstCallOnly = blockFirstCallOnly;
         }
 
         public AgentStage Stage { get; }
@@ -224,11 +221,8 @@ public class RunLeaseTests
         public async Task<StageOutcome> ExecuteAsync(AgentRun run, CancellationToken ct = default)
         {
             Calls++;
-            if (Calls == 1 || !_blockFirstCallOnly)
-            {
-                Entered.TrySetResult();
-                await Release.Task.WaitAsync(ct);
-            }
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(ct);
             return StageOutcome.To(_next, "blocked then released");
         }
     }
