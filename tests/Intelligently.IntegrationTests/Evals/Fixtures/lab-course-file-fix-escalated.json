@@ -44,9 +44,9 @@
     { "stage": "Observe", "kind": "Transition", "to": "Verify" },
     { "stage": "Verify", "kind": "Transition", "to": "Act" },
     { "stage": "Act", "kind": "ModelCall", "model": "claude-opus-5-5", "inputTokens": 320, "outputTokens": 160, "cacheReadInputTokens": 3200, "cacheCreationInputTokens": 0, "costUsd": 0.005120, "reasoningSummary": "Re-run with the edited Helpers.cs.", "stopReason": "tool_use", "effort": "medium", "latencyMs": 1830.0 },
-    { "stage": "Act", "kind": "Approval", "decision": "Pending" },
+    { "stage": "Act", "kind": "Approval", "decision": "Pending", "ruleKind": "CourseMaterial" },
     { "stage": "Act", "kind": "Transition", "to": "AwaitingApproval" },
-    { "stage": "AwaitingApproval", "kind": "Approval", "decision": "Denied" },
+    { "stage": "AwaitingApproval", "kind": "Approval", "decision": "Denied", "ruleKind": "CourseMaterial" },
     { "stage": "AwaitingApproval", "kind": "Transition", "to": "Recover" },
     { "stage": "Recover", "kind": "Escalation" },
     { "stage": "Recover", "kind": "Transition", "to": "Failed" }

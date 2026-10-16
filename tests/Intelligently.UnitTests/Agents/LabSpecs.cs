@@ -61,6 +61,13 @@ internal static class LabSpecs
         ],
     };
 
+    /// <summary>A one-step plan that re-runs the lab (the sandbox step must carry a phase).</summary>
+    public static AgentPlan SandboxPlan(string phase = LabPhases.Rerun) => new()
+    {
+        Goal = "Run the lab.",
+        Steps = [new PlanStep { Index = 0, Phase = phase, Description = "Run the lab.", Tool = RunLabCodeTool.ToolName, SuccessCriteria = "The sandbox result matches the phase." }],
+    };
+
     /// <summary>A plan whose only steps are a tagged sandbox run and an explanation.</summary>
     public static AgentPlan ShortPlan(string firstPhase = LabPhases.Rerun) => new()
     {

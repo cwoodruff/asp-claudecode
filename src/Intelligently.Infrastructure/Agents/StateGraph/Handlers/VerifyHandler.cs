@@ -4,6 +4,7 @@ using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
@@ -59,6 +60,7 @@ public sealed class VerifyHandler : IStageHandler
 
         var planStep = plan.Steps[run.CurrentStepIndex];
         var results = StepQueries.Results(step);
+        var calls = StepQueries.Calls(step);
 
         // 1. Generic deterministic checks.
         if (planStep.Tool is not null)
@@ -82,7 +84,11 @@ public sealed class VerifyHandler : IStageHandler
         var message = "Passed deterministic checks.";
         if (_tasks.Find(run.TaskType) is { } contract)
         {
-            var context = new StepVerification(run, plan, planStep, step, results);
+            var prior = await _db.AgentSteps.AsNoTracking()
+                .Where(s => s.RunId == run.Id && s.PlanRevision == run.PlanRevision && s.Id != step.Id)
+                .OrderBy(s => s.StartedAt).ThenBy(s => s.Attempt)
+                .ToListAsync(ct);
+            var context = new StepVerification(run, plan, planStep, step, calls, results, prior);
             var verdict = contract.VerifyStep(context);
             if (verdict is { Passed: false })
                 return Fail(run, step, verdict.Message);
@@ -90,15 +96,19 @@ public sealed class VerifyHandler : IStageHandler
             {
                 message = verdict.Message;
             }
-            else if (contract.JudgementRubric(context) is { } rubric)
+            else if (contract.JudgementRubric(context) is { } judgement)
             {
                 if (run.Budget.IsExhausted)
                     return Exhausted(run, planStep, plan, $"step {planStep.Index} needs a model judgement");
 
-                var judged = await JudgeAsync(run, step, planStep, rubric, ct);
-                if (!judged.Passed)
-                    return Fail(run, step, $"Judged step {planStep.Index} failed (score {judged.Score:0.00}): {judged.Rationale}");
-                message = $"Judged step {planStep.Index} passed (score {judged.Score:0.00}): {judged.Rationale}";
+                var judged = await JudgeAsync(run, step, planStep, judgement, ct);
+                // The threshold is enforced here, not trusted to the model's pass flag: a finite score in [0, 1] at or above the contract's minimum.
+                var scored = double.IsFinite(judged.Score) && judged.Score is >= 0 and <= 1;
+                if (!scored)
+                    return Fail(run, step, $"Judged step {planStep.Index} failed: the judge returned an invalid score ({judged.Score}). {judged.Rationale}");
+                if (!judged.Passed || judged.Score < judgement.MinimumScore)
+                    return Fail(run, step, $"Judged step {planStep.Index} failed (score {judged.Score:0.00}, minimum {judgement.MinimumScore:0.00}): {judged.Rationale}");
+                message = $"Judged step {planStep.Index} passed (score {judged.Score:0.00}, minimum {judgement.MinimumScore:0.00}): {judged.Rationale}";
             }
         }
 
@@ -121,14 +131,14 @@ public sealed class VerifyHandler : IStageHandler
     }
 
     /// <summary>Contract 4: one judge call over the run's transcript, charged to the run and stored as a ModelCall row plus a Judgement row.</summary>
-    private async Task<JudgementResult> JudgeAsync(AgentRun run, AgentStep step, PlanStep planStep, string rubric, CancellationToken ct)
+    private async Task<JudgementResult> JudgeAsync(AgentRun run, AgentStep step, PlanStep planStep, JudgementSpec judgement, CancellationToken ct)
     {
         var envelope = await _context.BuildAsync(run, Stage, ct);
 
         JudgementResult result;
         using (_evidence.StartModelCall(run, Stage, _model, "high"))
         {
-            result = await _engine.JudgeAsync(envelope, rubric, ct);
+            result = await _engine.JudgeAsync(envelope, judgement.Rubric, ct);
             await UsageAccounting.RecordAsync(_costs, _evidence, run, Stage, envelope, result.Usage, result.RawResponse, null, result.Metadata, step.Id, ct);
         }
 
@@ -144,9 +154,11 @@ public sealed class VerifyHandler : IStageHandler
                 phase = planStep.Phase,
                 attempt = step.Attempt,
                 passed = result.Passed,
-                score = result.Score,
+                // JSON has no NaN or infinity; a judge that returned one is recorded as having given no score.
+                score = double.IsFinite(result.Score) ? result.Score : (double?)null,
+                minimumScore = judgement.MinimumScore,
                 rationale = result.Rationale,
-                rubric,
+                rubric = judgement.Rubric,
             }),
         }, ct);
 

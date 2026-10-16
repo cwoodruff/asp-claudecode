@@ -14,6 +14,10 @@ public static class UnifiedDiff
     /// <summary>The unified diff of <paramref name="oldText"/> to <paramref name="newText"/> for one file, or null when they are identical.</summary>
     public static string? Create(string path, string? oldText, string? newText)
     {
+        // Identical text (newline style aside) needs no table: unchanged files are the common case.
+        if (string.Equals(Normalize(oldText), Normalize(newText), StringComparison.Ordinal))
+            return null;
+
         var oldLines = Lines(oldText);
         var newLines = Lines(newText);
         var edits = Edits(oldLines, newLines);
@@ -70,10 +74,12 @@ public static class UnifiedDiff
 
     private readonly record struct Edit(EditKind Kind, string Text, int OldIndex, int NewIndex);
 
+    private static string? Normalize(string? text) => text?.Replace("\r\n", "\n");
+
     private static List<string> Lines(string? text)
     {
         if (string.IsNullOrEmpty(text)) return [];
-        var lines = text.Replace("\r\n", "\n").Split('\n').ToList();
+        var lines = Normalize(text)!.Split('\n').ToList();
         if (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
         return lines;
     }

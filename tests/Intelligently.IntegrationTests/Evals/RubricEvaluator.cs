@@ -1,6 +1,8 @@
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Core.Agents.Tasks;
+using Intelligently.Infrastructure.Agents.Tasks;
 
 namespace Intelligently.IntegrationTests.Evals;
 
@@ -67,8 +69,20 @@ public static class RubricEvaluator
             Check("evidence.judgement_has_verify_model_call", modelCalls.Count(t => ParseStage(t.Stage) == AgentStage.Verify) == judgements.Count, "one Verify-stage model call per judgement");
         }
         if (candidates.Count > 0)
-            Check("evidence.candidate_search_kept_one", candidates.Count(c => c.Decision == "Selected") == searchedPlanStages && candidates.Where(c => c.Score is not null).All(c => c.Score is >= 0 and <= 1),
-                $"{candidates.Count} candidate row(s) over {searchedPlanStages} search(es)");
+        {
+            // Candidate rows of one search are contiguous and start at index 0. A search with a valid (judged)
+            // candidate keeps exactly one; an all-invalid search deliberately keeps none and the run recovers.
+            var searches = new List<List<FixtureTrace>>();
+            foreach (var candidate in candidates)
+            {
+                if (candidate.Candidate == 0 || searches.Count == 0) searches.Add([]);
+                searches[^1].Add(candidate);
+            }
+            Check("evidence.candidate_search_kept_one_valid_candidate",
+                searches.All(s => s.Count(c => c.Decision == "Selected") == (s.Any(c => c.Score is not null) ? 1 : 0))
+                && candidates.Where(c => c.Score is not null).All(c => c.Score is >= 0 and <= 1),
+                $"{candidates.Count} candidate row(s) over {searches.Count} search(es)");
+        }
 
         var tokensIn = modelCalls.Sum(t => t.InputTokens + t.CacheReadInputTokens + t.CacheCreationInputTokens);
         var tokensOut = modelCalls.Sum(t => t.OutputTokens);
@@ -151,12 +165,12 @@ public static class RubricEvaluator
 
         // --- Lab error diagnosis (Phase 6): the template, the verification path and the learner output ---
         if (string.Equals(fixture.Run.TaskType, LabErrorDiagnosisSpec.TaskType, StringComparison.OrdinalIgnoreCase))
-            EvaluateLab(fixture, stages, judgements, modelCalls, deniedApprovals, outcome, Check);
+            EvaluateLab(fixture, stages, judgements, outcome, Check);
 
         return new FixtureScore(fixture.Name, results);
     }
 
-    private static void EvaluateLab(TraceFixture fixture, List<AgentStage> stages, List<FixtureTrace> judgements, List<FixtureTrace> modelCalls, int deniedApprovals, string outcome, Action<string, bool, string> check)
+    private static void EvaluateLab(TraceFixture fixture, List<AgentStage> stages, List<FixtureTrace> judgements, string outcome, Action<string, bool, string> check)
     {
         var steps = fixture.Steps.OrderBy(s => s.PlanRevision).ThenBy(s => s.PlanStepIndex).ThenBy(s => s.Attempt).ToList();
         var tagged = steps.Where(s => s.Phase is not null).ToList();
@@ -180,7 +194,13 @@ public static class RubricEvaluator
         }
         else if (passedExplains > 0)
         {
-            check("lab.explanation_judged_without_ground_truth", judgements.Count == passedExplains && judgements.All(j => j.Score is >= 0.7), $"{judgements.Count} judgement(s) for {passedExplains} passed explanation step(s)");
+            // One judgement at or above the threshold per passed explanation attempt; a judgement below it is a
+            // failed attempt that Recover retried, which is evidence of the gate working, not a defect.
+            var passingJudgements = judgements.Count(j => j.Score is >= LabErrorDiagnosisContract.ExplanationMinimumScore);
+            var failedExplains = steps.Count(s => s.Phase == LabPhases.Explain && s.Status == AgentStep.StatusFailed);
+            check("lab.explanation_judged_without_ground_truth",
+                passingJudgements == passedExplains && judgements.Count - passingJudgements <= failedExplains,
+                $"{judgements.Count} judgement(s) ({passingJudgements} at or above {LabErrorDiagnosisContract.ExplanationMinimumScore}) for {passedExplains} passed and {failedExplains} failed explanation step(s)");
         }
 
         if (outcome is "completed" or "recovered")
@@ -190,9 +210,16 @@ public static class RubricEvaluator
                 check("lab.fix_diff_stored_when_the_fix_ran", fixture.Run.HasFixDiff, "FixDiff set when a re-run succeeded");
         }
 
-        if (deniedApprovals > 0)
-            check("lab.course_material_denial_escalates", outcome == "escalated" && (fixture.Run.StatusReason ?? string.Empty).Contains("course-provided material", StringComparison.OrdinalIgnoreCase) && fixture.Run.Budget.ReplansLeft == 3,
-                "a denied course-material change escalates without replanning");
+        // A denied course-material approval must escalate without a replan after it; a denied Risk approval replans instead.
+        var materialDenials = fixture.Traces.Where(t => t.Kind == AgentTrace.KindApproval && t.Decision == "Denied" && t.RuleKind == nameof(PolicyRuleKind.CourseMaterial)).ToList();
+        if (materialDenials.Count > 0)
+        {
+            var lastDenial = stages.LastIndexOf(AgentStage.AwaitingApproval);
+            var replannedAfterDenial = lastDenial >= 0 && stages.Skip(lastDenial).Contains(AgentStage.Plan);
+            check("lab.course_material_denial_escalates",
+                outcome == "escalated" && !replannedAfterDenial && (fixture.Run.StatusReason ?? string.Empty).Contains("course-provided material", StringComparison.OrdinalIgnoreCase),
+                replannedAfterDenial ? "the run replanned after the denial" : "escalated without a replan after the denial");
+        }
     }
 
     private static AgentStage ParseStage(string name) => Enum.Parse<AgentStage>(name, ignoreCase: true);

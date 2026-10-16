@@ -81,6 +81,11 @@ public class CandidateSearchTests
         rows.Should().OnlyContain(r => r.GetProperty("totalCostUsd").GetDecimal() > 0 && r.GetProperty("rationale").GetString()!.Contains("scored"));
         rows[1].GetProperty("steps").EnumerateArray().Should().ContainSingle();
 
+        var judgeRows = modelCalls.Where(t => t.InputTokens == 200).ToList();
+        judgeRows.Should().OnlyContain(t => t.Payload.Contains("Judge it against the rubric") && !t.Payload.Contains("Produce the plan"),
+            "a judge row stores the envelope the judge received, with the candidate and the judging instruction");
+        judgeRows.Select(t => t.Payload).Should().Contain(p => p.Contains("Plan B"));
+
         planned.TotalInputTokens.Should().Be(3 * 120 + 3 * 200, "the whole search is charged to the run");
         planned.TotalOutputTokens.Should().Be(3 * 40 + 3 * 30);
         planned.TotalCostUsd.Should().Be(modelCalls.Sum(t => t.CostUsd));
@@ -104,6 +109,56 @@ public class CandidateSearchTests
         var rows = traces.Where(t => t.Kind == AgentTrace.KindCandidate).Select(t => JsonDocument.Parse(t.Payload).RootElement).ToList();
         rows.Count(r => !r.GetProperty("succeeded").GetBoolean()).Should().Be(2);
         rows.Where(r => !r.GetProperty("succeeded").GetBoolean()).Should().OnlyContain(r => r.GetProperty("failureReason").GetString() == "schema mismatch" && r.GetProperty("score").ValueKind == JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task A_candidate_that_fails_plan_validation_is_neither_judged_nor_selected_whatever_it_would_score()
+    {
+        using var host = SearchingHost();
+        var unknownTool = PlanNamed("Plan X") with { Steps = [EngineStubs.LookupPlan().Steps[0] with { Tool = "no_such_tool" }] };
+        var badPhase = LabSpecs.ShortPlan(LabPhases.Rerun) with { Goal = "Plan Y", Steps = [LabSpecs.ShortPlan(LabPhases.Rerun).Steps[0] with { Phase = "guess" }, LabSpecs.ShortPlan().Steps[1]] };
+        StubCandidates(host, [unknownTool, PlanNamed("Plan A"), badPhase], new Dictionary<string, double> { ["Plan X"] = 0.99, ["Plan A"] = 0.5, ["Plan Y"] = 0.95 });
+        var run = await host.CreateRunAsync();
+
+        await host.StepAsync(run.Id);
+        var planned = await host.StepAsync(run.Id);
+
+        planned.Stage.Should().Be(AgentStage.Act);
+        planned.StatusReason.Should().Contain("kept candidate 1 of 3 (score 0.50)");
+        (await host.QueryAsync(db => db.AgentPlans.SingleAsync(p => p.RunId == run.Id))).Goal.Should().Be("Plan A");
+        host.Engine.Verify(e => e.JudgeAsync(It.IsAny<PromptEnvelope>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once, "only the executable candidate is judged");
+        var rows = (await host.QueryAsync(db => db.AgentTraces.Where(t => t.RunId == run.Id && t.Kind == AgentTrace.KindCandidate).OrderBy(t => t.Id).ToListAsync()))
+            .Select(t => JsonDocument.Parse(t.Payload).RootElement).ToList();
+        rows[0].GetProperty("succeeded").GetBoolean().Should().BeFalse();
+        rows[0].GetProperty("failureReason").GetString().Should().Contain("unknown tool 'no_such_tool'");
+        rows[0].GetProperty("judged").GetBoolean().Should().BeFalse();
+        rows[0].GetProperty("score").ValueKind.Should().Be(JsonValueKind.Null);
+        rows[2].GetProperty("failureReason").GetString().Should().Contain("phase 'guess'");
+        rows.Select(r => r.GetProperty("selected").GetBoolean()).Should().Equal(false, true, false);
+    }
+
+    [Fact]
+    public async Task No_judge_runs_when_the_planner_batch_spends_the_hard_budget()
+    {
+        using var host = new AgentTestHost(s => s.Configure<AgentsOptions>(o =>
+        {
+            o.CandidateSearch.Candidates = 3;
+            o.CandidateSearch.TaskTypes = [LabErrorDiagnosisSpec.TaskType];
+            o.Budgets.TokensLeft = 400;   // three planner calls of 160 tokens spend it
+        }));
+        StubCandidates(host, [PlanNamed("Plan A"), PlanNamed("Plan B"), PlanNamed("Plan C")], new Dictionary<string, double> { ["Plan A"] = 0.4, ["Plan B"] = 0.9, ["Plan C"] = 0.6 });
+        var run = await host.CreateRunAsync();
+
+        await host.StepAsync(run.Id);
+        var planned = await host.StepAsync(run.Id);
+
+        planned.Stage.Should().Be(AgentStage.Recover);
+        planned.StatusReason.Should().Contain("Hard budget exhausted after the planner call");
+        planned.Budget.TokensLeft.Should().Be(0);
+        host.Engine.Verify(e => e.JudgeAsync(It.IsAny<PromptEnvelope>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "no paid call runs on a spent budget");
+        var traces = await host.QueryAsync(db => db.AgentTraces.Where(t => t.RunId == run.Id && t.Stage == AgentStage.Plan).ToListAsync());
+        traces.Count(t => t.Kind == AgentTrace.KindModelCall).Should().Be(3, "the planner calls are still recorded and charged");
+        traces.Where(t => t.Kind == AgentTrace.KindCandidate).Select(t => JsonDocument.Parse(t.Payload).RootElement.GetProperty("judged").GetBoolean()).Should().OnlyContain(j => !j);
     }
 
     [Fact]

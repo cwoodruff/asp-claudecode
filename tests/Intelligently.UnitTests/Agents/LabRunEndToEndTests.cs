@@ -84,8 +84,7 @@ public class LabRunEndToEndTests
     [Fact]
     public async Task A_reproduce_step_that_does_not_reproduce_is_retried_and_the_explanation_falls_back_to_the_last_text()
     {
-        var calls = 0;
-        var sandbox = new FakeSandbox(_ => ++calls == 1 ? LabSpecs.Success("clean\n") : LabSpecs.CompileFailure());
+        var sandbox = new FakeSandbox(r => r.Files.Any(f => f.Content.Contains("Newtonsoft")) ? LabSpecs.CompileFailure() : LabSpecs.Success("clean\n"));
         using var host = new AgentTestHost(s =>
         {
             s.RemoveAll<ISandbox>();
@@ -111,7 +110,7 @@ public class LabRunEndToEndTests
         stages.Should().ContainInOrder(AgentStage.Verify, AgentStage.Recover, AgentStage.Act);
         var first = await host.QueryAsync(db => db.AgentSteps.SingleAsync(s => s.RunId == run.Id && s.PlanStepIndex == 0 && s.Attempt == 1));
         first.Status.Should().Be(AgentStep.StatusFailed);
-        first.VerifierMessage.Should().Contain("did not reproduce");
+        first.VerifierMessage.Should().Contain("submitted files unchanged", "the first attempt ran a changed file, which is not a reproduction");
         final.FinalExplanation.Should().Be("The build fails because Newtonsoft.Json is not referenced.");
         final.FixDiff.Should().BeNull("no step after the reproduce phase ran a successful fix");
         final.StatusReason.Should().Contain("no file changes");

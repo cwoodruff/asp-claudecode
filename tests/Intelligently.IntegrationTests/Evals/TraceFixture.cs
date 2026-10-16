@@ -103,6 +103,9 @@ public sealed record FixtureTrace
     public string? To { get; init; }
     public int? ExitCode { get; init; }
 
+    /// <summary>For Approval rows: the <c>PolicyRuleKind</c> of the rule that asked (<c>Risk</c>, <c>CourseMaterial</c>).</summary>
+    public string? RuleKind { get; init; }
+
     /// <summary>For Judgement and Candidate rows: the judge's score (null for a candidate that was not valid, so not judged).</summary>
     public double? Score { get; init; }
 

@@ -200,7 +200,7 @@ public class EvidencePlaneTests
     public async Task Sandbox_runs_leave_a_sandbox_log_row_with_exit_code_and_output()
     {
         using var host = new AgentTestHost(s => s.AddSingleton<ISandbox>(new FakeSandbox()));
-        EngineStubs.PlanReturns(host.Engine, StubTool.PlanFor(RunLabCodeTool.ToolName));
+        EngineStubs.PlanReturns(host.Engine, LabSpecs.SandboxPlan());
         EngineStubs.DecideReturns(host.Engine, LabCode.Call());
 
         var run = await host.CreateRunAsync();

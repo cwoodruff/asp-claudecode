@@ -23,12 +23,14 @@ public sealed class IndexModel : PageModel
 
     [BindProperty] public int CourseId { get; set; } = 1;
     [BindProperty] public string TaskType { get; set; } = "LabErrorDiagnosis";
-    [BindProperty] public string TaskSpec { get; set; } = DefaultLabSpec;
+    [BindProperty] public string TaskSpec { get; set; } = DefaultLabSpecFor(1);
 
-    /// <summary>A LabErrorDiagnosis spec the demo form starts with: one learner file, the compiler error, no expected output.</summary>
-    public const string DefaultLabSpec = """
+    /// <summary>A LabErrorDiagnosis spec the demo form starts with: one learner file, the compiler error, no expected output, for the given course.</summary>
+    public static string DefaultLabSpecFor(int courseId) => DefaultLabSpecTemplate.Replace("{course_id}", courseId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    private const string DefaultLabSpecTemplate = """
         {
-          "course_id": 1,
+          "course_id": {course_id},
           "module_id": 3,
           "language": "csharp",
           "learner_files": [
@@ -51,6 +53,8 @@ public sealed class IndexModel : PageModel
         EnrolledCourses = User.GetEnrolledCourseIds();
         if (EnrolledCourses.Count > 0 && !EnrolledCourses.Contains(CourseId))
             CourseId = EnrolledCourses[0];
+        // The default spec must name the course the run will act in; a spec the learner typed is left alone (POST binds it).
+        TaskSpec = DefaultLabSpecFor(CourseId);
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)

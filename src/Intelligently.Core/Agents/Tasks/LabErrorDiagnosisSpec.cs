@@ -52,9 +52,9 @@ public sealed record LabErrorDiagnosisSpec(
     [JsonIgnore]
     public IEnumerable<LabSpecFile> AllFiles => LearnerFiles.Concat(CourseFiles ?? []);
 
-    /// <summary>True when the lab has a known answer, so Verify can use the ground-truth gate instead of a model judgement.</summary>
+    /// <summary>True when the lab has a known answer (an empty string is a known answer: no output), so Verify can use the ground-truth gate instead of a model judgement.</summary>
     [JsonIgnore]
-    public bool HasExpectedOutput => !string.IsNullOrEmpty(ExpectedOutput);
+    public bool HasExpectedOutput => ExpectedOutput is not null;
 
     public bool IsCourseFile(string path) => CourseFiles?.Any(f => string.Equals(f.Path, path, StringComparison.Ordinal)) == true;
 }

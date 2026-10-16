@@ -125,7 +125,7 @@ public class SandboxToolTests
         var attempt = 0;
         var sandbox = new FakeSandbox(r => ++attempt == 1 ? FakeSandbox.TimedOut(r) : FakeSandbox.Completed(r, 0, "hi\n"));
         using var host = Host(sandbox);
-        EngineStubs.PlanReturns(host.Engine, StubTool.PlanFor(RunLabCodeTool.ToolName));
+        EngineStubs.PlanReturns(host.Engine, LabSpecs.SandboxPlan());
         EngineStubs.DecideReturns(host.Engine, LabCode.Call(expectedOutput: "hi"));
 
         var run = await host.CreateRunAsync();

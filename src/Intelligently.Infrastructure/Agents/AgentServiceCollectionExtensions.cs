@@ -51,6 +51,7 @@ public static class AgentServiceCollectionExtensions
 
         // Intelligence Plane (candidate search records evidence, so it lives on the stage's unit of work)
         services.AddSingleton<IReasoningEngine, AnthropicReasoningEngine>();
+        services.AddScoped<PlanValidator>();
         services.AddScoped<ICandidateSearch, CandidateSearch>();
 
         // Context Plane: retrieval and episodic memory on the scoped DbContext; counting, budgeting,

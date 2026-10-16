@@ -4,6 +4,7 @@ using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Core.Agents.Tasks;
+using Intelligently.Infrastructure.Agents.Execution;
 using Intelligently.Infrastructure.Agents.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -102,6 +103,14 @@ public class LabErrorDiagnosisSpecTests
         var duplicate = Contract.ValidateSpec(Run(LabSpecs.Json(courseFiles: [new LabSpecFile(LabSpecs.Entrypoint, "dup")])));
         duplicate.Summary.Should().Contain("appears more than once");
 
+        var alias = Contract.ValidateSpec(Run(LabSpecs.Json(courseFiles: [new LabSpecFile("./" + LabSpecs.Entrypoint, "dup")])));
+        alias.Summary.Should().Contain("appears more than once", "paths are compared in canonical form");
+
+        var escaping = Contract.ValidateSpec(Run(LabSpecs.Json(courseFiles: [new LabSpecFile("../outside.cs", "x")])));
+        escaping.Summary.Should().Contain("not a relative path inside the lab");
+        LabPaths.Normalize("sub\\..\\Helpers.cs").Should().Be("Helpers.cs");
+        LabPaths.Normalize("/etc/passwd").Should().BeNull();
+
         var noFiles = Contract.ValidateSpec(Run("""{"course_id":7,"language":"csharp","learner_files":[],"entrypoint":"Program.cs","error_text":"x","learner_level":"Beginner"}"""));
         noFiles.Summary.Should().Contain("learner_files must contain at least one file").And.Contain("entrypoint 'Program.cs' is not among");
 
@@ -173,7 +182,22 @@ public class LabErrorDiagnosisSpecTests
         Contract.ValidatePlan(run, unknownPhase).Should().Contain("phase 'guess'");
 
         var sandboxInDiagnose = LabSpecs.TemplatePlan() with { Steps = [LabSpecs.TemplatePlan().Steps[0] with { Phase = LabPhases.Diagnose }] };
-        Contract.ValidatePlan(run, sandboxInDiagnose).Should().Contain("calls run_lab_code in phase 'diagnose'");
+        Contract.ValidatePlan(run, sandboxInDiagnose).Should().Contain("calls run_lab_code with phase 'diagnose'");
+
+        var untaggedSandbox = StubTool.PlanFor(RunLabCodeTool.ToolName);
+        Contract.ValidatePlan(run, untaggedSandbox).Should().Contain("with phase 'none'", "a sandbox step must say whether it reproduces or re-runs");
+
+        var rerunBeforeReproduce = LabSpecs.TemplatePlan() with
+        {
+            Steps = [LabSpecs.TemplatePlan().Steps[3] with { Index = 0 }, LabSpecs.TemplatePlan().Steps[0] with { Index = 1 }],
+        };
+        Contract.ValidatePlan(run, rerunBeforeReproduce).Should().Contain("reproduce first");
+
+        var explainNotLast = LabSpecs.TemplatePlan() with
+        {
+            Steps = [LabSpecs.TemplatePlan().Steps[4] with { Index = 0 }, LabSpecs.TemplatePlan().Steps[0] with { Index = 1 }],
+        };
+        Contract.ValidatePlan(run, explainNotLast).Should().Contain("not the last step");
 
         var tooLong = LabSpecs.TemplatePlan() with
         {
@@ -195,7 +219,7 @@ public class LabErrorDiagnosisSpecTests
         var planned = await host.StepAsync(run.Id);
 
         planned.Stage.Should().Be(AgentStage.Recover);
-        planned.StatusReason.Should().Contain("calls run_lab_code in phase 'propose_fix'");
+        planned.StatusReason.Should().Contain("calls run_lab_code with phase 'propose_fix'");
     }
 
     [Fact]
@@ -207,6 +231,8 @@ public class LabErrorDiagnosisSpecTests
         diff.Should().Contain("-using Newtonsoft.Json;").And.Contain("+using System.Text.Json;");
         diff.Should().Contain(" using System;", "unchanged lines are context");
         UnifiedDiff.Create("Program.cs", "same\n", "same\n").Should().BeNull();
+        UnifiedDiff.Create("Program.cs", "same\r\n", "same\n").Should().BeNull("newline style is not a change");
         UnifiedDiff.Create("New.cs", null, "line\n")!.Should().StartWith("--- /dev/null\n+++ b/New.cs").And.Contain("+line");
+        UnifiedDiff.Create("Old.cs", "line\n", null)!.Should().StartWith("--- a/Old.cs\n+++ /dev/null").And.Contain("-line");
     }
 }

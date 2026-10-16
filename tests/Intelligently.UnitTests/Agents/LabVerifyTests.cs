@@ -40,13 +40,25 @@ public class LabVerifyTests
     private static DecisionResult Text(string text) => new([], text, "end_turn", EngineStubs.Usage, "{}");
     private static DecisionResult Call(ToolCall call) => new([call], "Running the lab.", "tool_use", EngineStubs.Usage, "{}");
 
+    /// <summary>A verification context for one plan step; the sandbox calls behind the results default to running the submitted files.</summary>
     private static StepVerification Context(AgentRun run, PlanStep planStep, AgentStep step, params ToolResult[] results) =>
-        new(run, new AgentPlan { Goal = "g", Steps = [planStep] }, planStep, step, results);
+        Context(run, planStep, step, results.Select(r => LabSpecs.RunCall(r.ToolCallId, LabSpecs.BrokenProgram)).ToList(), results, []);
 
-    private static ToolResult SandboxResult(SandboxResult result, bool? matches = null)
+    private static StepVerification Context(AgentRun run, PlanStep planStep, AgentStep step, IReadOnlyList<ToolCall> calls, IReadOnlyList<ToolResult> results, IReadOnlyList<AgentStep> prior) =>
+        new(run, new AgentPlan { Goal = "g", Steps = [planStep] }, planStep, step, calls, results, prior);
+
+    private static ToolResult SandboxResult(SandboxResult result, bool? matches = null, string id = "toolu_lab")
     {
         var output = new RunLabCodeOutput(result.Sandbox, result.ExitCode, result.Stdout, result.Stderr, result.TimedOut, result.MemoryExceeded, result.OutputTruncated, 0.5, result.Succeeded, matches, result.Error);
-        return ToolResult.Ok(new ToolCall("toolu_lab", RunLabCodeTool.ToolName, JsonSerializer.SerializeToElement(new { })), JsonSerializer.SerializeToElement(output, Intelligently.Infrastructure.Agents.Intelligence.AgentJsonSchema.SerializerOptions));
+        return ToolResult.Ok(new ToolCall(id, RunLabCodeTool.ToolName, JsonSerializer.SerializeToElement(new { })), JsonSerializer.SerializeToElement(output, Intelligently.Infrastructure.Agents.Intelligence.AgentJsonSchema.SerializerOptions));
+    }
+
+    /// <summary>The plan with all five template steps, plus an earlier step of it that passed, so an explain step has a proven re-run behind it.</summary>
+    private static StepVerification TemplateContext(AgentRun run, int stepIndex, AgentStep step, IReadOnlyList<ToolCall> calls, IReadOnlyList<ToolResult> results, params int[] passedStepIndexes)
+    {
+        var plan = LabSpecs.TemplatePlan();
+        var prior = passedStepIndexes.Select(i => new AgentStep { PlanRevision = plan.Revision, PlanStepIndex = i, Status = AgentStep.StatusPassed }).ToList();
+        return new StepVerification(run, plan, plan.Steps[stepIndex], step, calls, results, prior);
     }
 
     private static AgentRun RunWithSpec(string? expectedOutput = null) => new()
@@ -75,6 +87,35 @@ public class LabVerifyTests
 
         Contract.VerifyStep(Context(run, planStep, step))!
             .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("no sandbox result"));
+
+        // Reproduce must run the submission as it is: a changed file, an extra file or a missing course file is not a reproduction.
+        var failure = SandboxResult(LabSpecs.CompileFailure());
+        Contract.VerifyStep(Context(run, planStep, step, [LabSpecs.RunCall(failure.ToolCallId, LabSpecs.FixedProgram)], [failure], []))!
+            .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("submitted files unchanged"));
+        var withCourseFile = RunWithSpec();
+        withCourseFile.TaskSpec = LabSpecs.Json(courseFiles: LabSpecs.WithCourseFile);
+        Contract.VerifyStep(Context(withCourseFile, planStep, step, [LabSpecs.RunCall(failure.ToolCallId, LabSpecs.BrokenProgram)], [failure], []))!
+            .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("submitted files unchanged"), "the course file was left out");
+        Contract.VerifyStep(Context(withCourseFile, planStep, step, [LabSpecs.RunCall(failure.ToolCallId, LabSpecs.BrokenProgram, courseFiles: LabSpecs.WithCourseFile)], [failure], []))!
+            .Passed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Sandbox_calls_must_run_the_spec_language_and_entrypoint()
+    {
+        var run = RunWithSpec(LabSpecs.ExpectedOutput);
+        var rerun = LabSpecs.TemplatePlan().Steps[3];
+        var step = new AgentStep { AssistantText = "Re-running." };
+        var success = SandboxResult(LabSpecs.Success(LabSpecs.ExpectedOutput + "\n"));
+
+        Contract.VerifyStep(Context(run, rerun, step, [LabSpecs.RunCall(success.ToolCallId, "print('{\"ok\":true}')", language: "python", entrypoint: "lab.py")], [success], []))!
+            .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("'python'") && v.Message.Contains("'csharp'"), "a graded C# lab cannot pass by running a Python file that prints the answer");
+        Contract.VerifyStep(Context(run, rerun, step, [LabSpecs.RunCall(success.ToolCallId, LabSpecs.FixedProgram, entrypoint: "Other.cs")], [success], []))!
+            .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("entrypoint 'Other.cs'"));
+        Contract.VerifyStep(Context(run, rerun, step, [LabSpecs.RunCall(success.ToolCallId, LabSpecs.FixedProgram, entrypoint: "./Program.cs")], [success], []))!
+            .Passed.Should().BeTrue("an aliased spelling of the entrypoint is the same file");
+        Contract.VerifyStep(Context(run, rerun, step, [new ToolCall("toolu_other", RunLabCodeTool.ToolName, JsonSerializer.SerializeToElement(new { }))], [success], []))!
+            .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("cannot be matched"));
     }
 
     [Fact]
@@ -108,13 +149,21 @@ public class LabVerifyTests
         var explain = LabSpecs.TemplatePlan().Steps[4];
         var step = new AgentStep { AssistantText = "Newtonsoft is a package you have not referenced; System.Text.Json ships with .NET." };
 
-        var withGroundTruth = Context(RunWithSpec(LabSpecs.ExpectedOutput), explain, step);
+        var withGroundTruth = TemplateContext(RunWithSpec(LabSpecs.ExpectedOutput), 4, step, [], [], 0, 1, 2, 3);
         Contract.VerifyStep(withGroundTruth)!.Passed.Should().BeTrue();
         Contract.JudgementRubric(withGroundTruth).Should().BeNull();
 
+        // A graded lab whose plan never proved the fix by a passing re-run is not done, whatever the explanation says.
+        var unproven = TemplateContext(RunWithSpec(LabSpecs.ExpectedOutput), 4, step, [], [], 0, 1, 2);
+        Contract.VerifyStep(unproven)!.Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("no re-run of the fix passed"));
+
         var withoutGroundTruth = Context(RunWithSpec(), explain, step);
         Contract.VerifyStep(withoutGroundTruth).Should().BeNull("the model judges the explanation");
-        Contract.JudgementRubric(withoutGroundTruth).Should().Contain("Correctness of the diagnosis").And.Contain("Beginner").And.Contain("CS0246");
+        var judgement = Contract.JudgementRubric(withoutGroundTruth)!;
+        judgement.Rubric.Should().Contain("Correctness of the diagnosis").And.Contain("Beginner").And.Contain("CS0246");
+        judgement.MinimumScore.Should().Be(LabErrorDiagnosisContract.ExplanationMinimumScore);
+        Contract.VerifyStep(Context(new AgentRun { UserId = "l", CourseId = 7, TaskType = LabErrorDiagnosisSpec.TaskType, TaskSpec = LabSpecs.Json(expectedOutput: ""), Principal = RunPrincipal.Learner("l", 7) }, explain, step))!
+            .Passed.Should().BeFalse("an empty expected output is a known answer, so the lab is graded and needs a proven re-run");
 
         Contract.VerifyStep(Context(RunWithSpec(), explain, new AgentStep { AssistantText = " " }))!
             .Should().Match<StepVerdict>(v => !v.Passed && v.Message.Contains("no text"));
@@ -170,7 +219,7 @@ public class LabVerifyTests
 
         var explain = await host.QueryAsync(db => db.AgentSteps.SingleAsync(s => s.RunId == run.Id && s.PlanStepIndex == 1));
         explain.Status.Should().Be(AgentStep.StatusPassed);
-        explain.VerifierMessage.Should().Be("Judged step 1 passed (score 0.85): Accurate cause, beginner-friendly wording.");
+        explain.VerifierMessage.Should().Be("Judged step 1 passed (score 0.85, minimum 0.70): Accurate cause, beginner-friendly wording.");
 
         var traces = await host.QueryAsync(db => db.AgentTraces.Where(t => t.RunId == run.Id && t.StepId == explain.Id).OrderBy(t => t.Id).ToListAsync());
         var judgeCall = traces.Should().ContainSingle(t => t.Kind == AgentTrace.KindModelCall && t.Stage == AgentStage.Verify).Subject;
@@ -185,6 +234,7 @@ public class LabVerifyTests
         payload.RootElement.GetProperty("rationale").GetString().Should().Contain("beginner-friendly");
         payload.RootElement.GetProperty("phase").GetString().Should().Be(LabPhases.Explain);
         payload.RootElement.GetProperty("rubric").GetString().Should().Contain("Correctness of the diagnosis");
+        payload.RootElement.GetProperty("minimumScore").GetDouble().Should().Be(0.7);
 
         final.TotalInputTokens.Should().Be(120 * 3 + 300, "plan, two Act turns and the judge call are all charged");
         final.TotalOutputTokens.Should().Be(40 * 3 + 50);
@@ -210,8 +260,35 @@ public class LabVerifyTests
         stages.Should().ContainInOrder(AgentStage.Verify, AgentStage.Recover, AgentStage.Act, AgentStage.Observe, AgentStage.Verify, AgentStage.Learn);
         var attempts = await host.QueryAsync(db => db.AgentSteps.Where(s => s.RunId == run.Id && s.PlanStepIndex == 1).OrderBy(s => s.Attempt).ToListAsync());
         attempts.Select(s => s.Status).Should().Equal(AgentStep.StatusFailed, AgentStep.StatusPassed);
-        attempts[0].VerifierMessage.Should().Be("Judged step 1 failed (score 0.20): No cause is named; a beginner learns nothing.");
+        attempts[0].VerifierMessage.Should().Be("Judged step 1 failed (score 0.20, minimum 0.70): No cause is named; a beginner learns nothing.");
         (await host.QueryAsync(db => db.AgentTraces.CountAsync(t => t.RunId == run.Id && t.Kind == AgentTrace.KindJudgement))).Should().Be(2);
         judgeCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task The_pass_threshold_is_enforced_by_Verify_not_by_the_judge_s_pass_flag()
+    {
+        using var host = Host(new FakeSandbox(_ => LabSpecs.Success("ok\n")));
+        EngineStubs.PlanReturns(host.Engine, LabSpecs.ShortPlan(LabPhases.Rerun));
+        DecideSequence(host, Call(LabSpecs.RunCall("toolu_1", LabSpecs.FixedProgram)), Text("Some words."), Text("Better words."), Text("Best words."));
+        var judgeCalls = 0;
+        host.Engine.Setup(e => e.JudgeAsync(It.IsAny<PromptEnvelope>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => ++judgeCalls switch
+            {
+                1 => new JudgementResult(true, 0.2, "The model says pass, the score says otherwise.", EngineStubs.Usage, "{}"),
+                2 => new JudgementResult(true, double.NaN, "No number.", EngineStubs.Usage, "{}"),
+                _ => new JudgementResult(true, 0.7, "Exactly at the minimum.", EngineStubs.Usage, "{}"),
+            });
+
+        var run = await host.CreateRunAsync(taskSpec: LabSpecs.Json());
+        var (final, _) = await host.RunToEndAsync(run.Id);
+
+        final.Status.Should().Be(AgentRun.StatusCompleted);
+        final.Budget.RetriesLeft.Should().Be(0, "two judged attempts failed before one met the threshold");
+        var attempts = await host.QueryAsync(db => db.AgentSteps.Where(s => s.RunId == run.Id && s.PlanStepIndex == 1).OrderBy(s => s.Attempt).ToListAsync());
+        attempts.Select(s => s.Status).Should().Equal(AgentStep.StatusFailed, AgentStep.StatusFailed, AgentStep.StatusPassed);
+        attempts[0].VerifierMessage.Should().StartWith("Judged step 1 failed (score 0.20, minimum 0.70)");
+        attempts[1].VerifierMessage.Should().Contain("invalid score");
+        attempts[2].VerifierMessage.Should().StartWith("Judged step 1 passed (score 0.70, minimum 0.70)");
     }
 }

@@ -4,7 +4,7 @@ using System.Text.Json;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
-using Intelligently.Core.Agents.Tools;
+using Intelligently.Infrastructure.Agents.Intelligence;
 using Intelligently.Infrastructure.Data;
 using Microsoft.Extensions.Options;
 
@@ -13,15 +13,15 @@ namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 /// <summary>
 /// Plan: ask the Intelligence Plane for a schema-valid plan and persist it as a new revision. When
 /// candidate search is enabled for the task type, N plans are generated and judged and the best one is
-/// kept (every candidate is evidence); the task contract's template constraints are then applied.
+/// kept (every candidate is evidence). <see cref="PlanValidator"/> applies the structural checks and the task
+/// contract's template constraints to whichever plan comes back.
 /// </summary>
 public sealed class PlanHandler : IStageHandler
 {
     private readonly IContextAssembler _context;
     private readonly IReasoningEngine _engine;
     private readonly ICandidateSearch _search;
-    private readonly ITaskTypeRegistry _tasks;
-    private readonly IToolRegistry _tools;
+    private readonly PlanValidator _validator;
     private readonly IEvidenceSink _evidence;
     private readonly ICostAccountant _costs;
     private readonly IntelligentlyDbContext _db;
@@ -31,8 +31,7 @@ public sealed class PlanHandler : IStageHandler
         IContextAssembler context,
         IReasoningEngine engine,
         ICandidateSearch search,
-        ITaskTypeRegistry tasks,
-        IToolRegistry tools,
+        PlanValidator validator,
         IEvidenceSink evidence,
         ICostAccountant costs,
         IntelligentlyDbContext db,
@@ -41,8 +40,7 @@ public sealed class PlanHandler : IStageHandler
         _context = context;
         _engine = engine;
         _search = search;
-        _tasks = tasks;
-        _tools = tools;
+        _validator = validator;
         _evidence = evidence;
         _costs = costs;
         _db = db;
@@ -86,10 +84,8 @@ public sealed class PlanHandler : IStageHandler
             return Recover(run, (result.FailureReason ?? "Planner produced no plan.") + searched);
 
         var plan = result.Plan!;
-        if (Validate(plan) is { } problem)
+        if (_validator.Validate(run, plan) is { } problem)
             return Recover(run, problem + searched);
-        if (_tasks.Find(run.TaskType)?.ValidatePlan(run, plan) is { } templateProblem)
-            return Recover(run, templateProblem + searched);
 
         var canonical = JsonSerializer.Serialize(plan);
         var stored = plan with
@@ -120,22 +116,5 @@ public sealed class PlanHandler : IStageHandler
         run.RecoveryReason = RecoveryReasons.BudgetExhausted;
         return StageOutcome.To(AgentStage.Recover,
             $"Hard budget exhausted {when} (tokens {budget.TokensLeft}, tool calls {budget.ToolCallsLeft}, wall clock {budget.WallClockLeft}); no further model work.");
-    }
-
-    private string? Validate(AgentPlan plan)
-    {
-        if (string.IsNullOrWhiteSpace(plan.Goal)) return "Plan has no goal.";
-        if (plan.Steps.Count == 0) return "Plan has no steps.";
-
-        var knownTools = _tools.Descriptors.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
-        for (var i = 0; i < plan.Steps.Count; i++)
-        {
-            var step = plan.Steps[i];
-            if (step.Index != i) return $"Plan step {i} has index {step.Index}; indices must be sequential from 0.";
-            if (string.IsNullOrWhiteSpace(step.Description)) return $"Plan step {i} has no description.";
-            if (step.Tool is not null && !knownTools.Contains(step.Tool)) return $"Plan step {i} names unknown tool '{step.Tool}'.";
-        }
-
-        return null;
     }
 }

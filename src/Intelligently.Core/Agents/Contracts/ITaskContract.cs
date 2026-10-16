@@ -27,8 +27,27 @@ public sealed record PlanTemplate(string Summary, IReadOnlyList<PlanTemplateStep
     public bool HasPhase(string? phase) => phase is not null && Steps.Any(s => string.Equals(s.Phase, phase, StringComparison.Ordinal));
 }
 
-/// <summary>Everything a contract sees when verifying one step: the run, the plan step it fulfils, the step row and its normalized results.</summary>
-public sealed record StepVerification(AgentRun Run, AgentPlan Plan, PlanStep PlanStep, AgentStep Step, IReadOnlyList<ToolResult> Results);
+/// <summary>
+/// Everything a contract sees when verifying one step: the run, the plan step it fulfils, the step row, the
+/// tool calls the model made and their normalized results, and the earlier steps of the same plan revision
+/// (so a step can depend on what an earlier phase established).
+/// </summary>
+public sealed record StepVerification(
+    AgentRun Run,
+    AgentPlan Plan,
+    PlanStep PlanStep,
+    AgentStep Step,
+    IReadOnlyList<ToolCall> Calls,
+    IReadOnlyList<ToolResult> Results,
+    IReadOnlyList<AgentStep> PriorSteps)
+{
+    /// <summary>The plan step an earlier step of this revision fulfilled, or null when it is outside the plan.</summary>
+    public PlanStep? PlanStepOf(AgentStep step) =>
+        step.PlanRevision == Plan.Revision && step.PlanStepIndex >= 0 && step.PlanStepIndex < Plan.Steps.Count ? Plan.Steps[step.PlanStepIndex] : null;
+}
+
+/// <summary>A model judgement request: the rubric and the lowest score that counts as a pass (enforced by Verify, not left to the model).</summary>
+public sealed record JudgementSpec(string Rubric, double MinimumScore);
 
 /// <summary>A deterministic verdict on a step.</summary>
 public sealed record StepVerdict(bool Passed, string Message)
@@ -72,8 +91,8 @@ public interface ITaskContract
     /// </summary>
     StepVerdict? VerifyStep(StepVerification context);
 
-    /// <summary>The rubric for a model judgement of the step when <see cref="VerifyStep"/> could not decide, or null when the step passes without one.</summary>
-    string? JudgementRubric(StepVerification context);
+    /// <summary>The rubric and pass threshold for a model judgement of the step when <see cref="VerifyStep"/> could not decide, or null when the step passes without one.</summary>
+    JudgementSpec? JudgementRubric(StepVerification context);
 
     /// <summary>
     /// Describes how a proposed tool call changes protected course material (a course-provided file), or

@@ -64,6 +64,11 @@ public class CourseMaterialPolicyTests
         Contract.DescribeProtectedChange(run, unchanged).Should().BeNull();
         Contract.DescribeProtectedChange(run, omitted).Should().BeNull();
         Contract.DescribeProtectedChange(run, EngineStubs.LookupCall()).Should().BeNull("only sandbox calls submit files");
+
+        var aliased = LabSpecs.RunCall("t4", LabSpecs.FixedProgram, courseFiles: [new LabSpecFile("./" + LabSpecs.CourseFilePath, ChangedCourseFile)]);
+        Contract.DescribeProtectedChange(run, aliased).Should().Contain("'Helpers.cs'", "./Helpers.cs is the same sandbox file as Helpers.cs");
+        var twoSpellings = LabSpecs.RunCall("t5", LabSpecs.FixedProgram, courseFiles: [new LabSpecFile(LabSpecs.CourseFilePath, LabSpecs.CourseFile), new LabSpecFile("sub/../" + LabSpecs.CourseFilePath, ChangedCourseFile)]);
+        Contract.DescribeProtectedChange(run, twoSpellings).Should().Contain("'Helpers.cs'", "a changed version under any spelling is a change");
         Contract.DescribeProtectedChange(new AgentRun { TaskSpec = LabSpecs.Default, CourseId = 7 }, changed).Should().BeNull("a spec without course files protects nothing");
     }
 
