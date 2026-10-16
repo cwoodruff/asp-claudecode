@@ -69,8 +69,8 @@ public sealed class AccountCommands(
         var user = await FindAsync(userName);
         if (user is null) return 1;
 
-        var enrolled = await EnrolledCourseValuesAsync(user);
-        var toAdd = courses.Where(c => !enrolled.Contains(c.ToString(CultureInfo.InvariantCulture))).ToList();
+        var enrolled = (await CourseClaimsAsync(user)).Select(c => c.CourseId).OfType<int>().ToHashSet();
+        var toAdd = courses.Where(c => !enrolled.Contains(c)).ToList();
 
         if (toAdd.Count > 0
             && !Succeeded(await users.AddClaimsAsync(user, toAdd.Select(CourseClaim)), $"Could not enrol '{userName}'")) return 1;
@@ -87,12 +87,12 @@ public sealed class AccountCommands(
         var user = await FindAsync(userName);
         if (user is null) return 1;
 
-        var claims = await users.GetClaimsAsync(user);
+        var claims = await CourseClaimsAsync(user);
         foreach (var course in courses)
         {
-            var value = course.ToString(CultureInfo.InvariantCulture);
-            // Every matching claim, so a duplicate row cannot leave the user enrolled.
-            var matching = claims.Where(c => c.Type == IntelligentlyClaims.CourseClaimType && c.Value == value).ToList();
+            // Every claim the hosts read as this course ("2", "02", " 2"), so neither a duplicate row nor
+            // a differently written value can leave the user enrolled.
+            var matching = claims.Where(c => c.CourseId == course).Select(c => c.Claim).ToList();
             if (matching.Count == 0)
             {
                 output.WriteLine($"'{userName}' is not enrolled in course {course}.");
@@ -176,7 +176,7 @@ public sealed class AccountCommands(
         foreach (var user in all)
         {
             var userRoles = (await users.GetRolesAsync(user)).Order(StringComparer.OrdinalIgnoreCase);
-            var courses = await EnrolledCourseValuesAsync(user);
+            var courses = (await CourseClaimsAsync(user)).Select(c => c.Claim.Value).ToList();
             var lockout = user.LockoutEnd is { } end && end > DateTimeOffset.UtcNow
                 ? end.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)
                 : "-";
@@ -186,7 +186,7 @@ public sealed class AccountCommands(
                 user.UserName ?? "",
                 user.Email ?? "-",
                 Joined(userRoles),
-                Joined(courses.OrderBy(c => int.TryParse(c, out var id) ? id : int.MaxValue).ThenBy(c => c, StringComparer.Ordinal)),
+                Joined(courses.OrderBy(c => IntelligentlyClaims.TryParseCourseId(c, out var id) ? id : int.MaxValue).ThenBy(c => c, StringComparer.Ordinal)),
                 lockout,
             });
         }
@@ -206,11 +206,12 @@ public sealed class AccountCommands(
         return list.Count == 0 ? "-" : string.Join(",", list);
     }
 
-    private async Task<HashSet<string>> EnrolledCourseValuesAsync(IdentityUser user) =>
+    /// <summary>The user's enrolment claims with the course id the hosts parse from each (null when they ignore it).</summary>
+    private async Task<List<(Claim Claim, int? CourseId)>> CourseClaimsAsync(IdentityUser user) =>
         (await users.GetClaimsAsync(user))
             .Where(c => c.Type == IntelligentlyClaims.CourseClaimType)
-            .Select(c => c.Value)
-            .ToHashSet(StringComparer.Ordinal);
+            .Select(c => (c, IntelligentlyClaims.TryParseCourseId(c.Value, out var id) ? id : (int?)null))
+            .ToList();
 
     private async Task<IdentityUser?> FindAsync(string userName)
     {

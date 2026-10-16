@@ -9,7 +9,9 @@ public sealed class UsageException(string message) : Exception(message);
 /// <summary>
 /// Parses <c>&lt;command&gt; [--option value | --option=value | --flag]...</c>. Every command declares the
 /// options it accepts and which are required. Passwords are never accepted as arguments: any option whose
-/// name mentions a password is rejected without echoing its value.
+/// name mentions a password, anywhere on the line, is rejected first. Error messages name known commands
+/// and option names only; they never repeat a command token or an option value, which could be a password
+/// typed in the wrong place.
 /// </summary>
 public static class ToolCommandLine
 {
@@ -70,9 +72,14 @@ public static class ToolCommandLine
     {
         if (args.Count == 0) throw new UsageException("No command given.");
 
+        // Before anything else, so a password option ahead of the command is refused the same way.
+        if (args.Any(IsPasswordOption))
+            throw new UsageException(
+                "Passwords are not accepted on the command line. Set INTELLIGENTLY_NEW_PASSWORD or answer the prompt.");
+
         var name = args[0];
         if (name is "--help" or "-h" or "-?" or "/?") name = Help;
-        if (!Commands.TryGetValue(name, out var spec)) throw new UsageException($"Unknown command '{name}'.");
+        if (!Commands.TryGetValue(name, out var spec)) throw new UsageException("Unknown command; the first argument must be one of the commands below.");
 
         string? userName = null, email = null;
         var instructor = false;
@@ -89,10 +96,6 @@ public static class ToolCommandLine
             var equals = body.IndexOf('=');
             var option = equals >= 0 ? body[..equals] : body;
             string? inlineValue = equals >= 0 ? body[(equals + 1)..] : null;
-
-            if (option.Contains("password", StringComparison.OrdinalIgnoreCase) || option is "pwd" or "pass")
-                throw new UsageException(
-                    "Passwords are not accepted on the command line. Set INTELLIGENTLY_NEW_PASSWORD or answer the prompt.");
 
             if (!spec.Required.Contains(option) && !spec.Optional.Contains(option))
                 throw new UsageException($"Option '--{option}' is not valid for '{name}'.");
@@ -124,7 +127,7 @@ public static class ToolCommandLine
                     break;
                 case Course:
                     if (!int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) || id <= 0)
-                        throw new UsageException($"'--course' must be a positive whole number, got '{value}'.");
+                        throw new UsageException("'--course' must be a positive whole number.");
                     if (!courses.Contains(id)) courses.Add(id);
                     break;
             }
@@ -136,5 +139,15 @@ public static class ToolCommandLine
             throw new UsageException($"'{name}' needs {string.Join(" and ", missing.Select(m => $"--{m}"))}.");
 
         return new ToolCommand(name, userName, email, instructor, courses);
+    }
+
+    private static bool IsPasswordOption(string arg)
+    {
+        if (!arg.StartsWith('-')) return false;
+        var option = arg.TrimStart('-').Split('=', 2)[0];
+        return option.Contains("password", StringComparison.OrdinalIgnoreCase)
+            || option.Equals("pwd", StringComparison.OrdinalIgnoreCase)
+            || option.Equals("pass", StringComparison.OrdinalIgnoreCase)
+            || option.Equals("p", StringComparison.Ordinal);
     }
 }

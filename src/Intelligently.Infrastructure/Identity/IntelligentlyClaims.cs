@@ -33,10 +33,16 @@ public static class IntelligentlyClaims
         return string.IsNullOrWhiteSpace(name) ? user.GetUserId() : name;
     }
 
+    /// <summary>
+    /// How a <see cref="CourseClaimType"/> claim value becomes a course id. The single rule for the hosts and the
+    /// account tool, so a value such as <c>"02"</c> that authorizes course 2 is also what revoking course 2 removes.
+    /// </summary>
+    public static bool TryParseCourseId(string? value, out int courseId) => int.TryParse(value, out courseId);
+
     /// <summary>Course ids from the user's <see cref="CourseClaimType"/> claims; non-numeric values are ignored.</summary>
     public static IReadOnlyList<int> GetEnrolledCourseIds(this ClaimsPrincipal user) =>
         user.FindAll(CourseClaimType)
-            .Select(c => int.TryParse(c.Value, out var id) ? id : (int?)null)
+            .Select(c => TryParseCourseId(c.Value, out var id) ? id : (int?)null)
             .Where(id => id.HasValue)
             .Select(id => id!.Value)
             .Distinct()

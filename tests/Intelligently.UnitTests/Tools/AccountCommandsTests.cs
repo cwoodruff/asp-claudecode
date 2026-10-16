@@ -263,6 +263,30 @@ public sealed class AccountCommandsTests : IDisposable
         _output.ToString().Should().Contain("not enrolled in course 9");
     }
 
+    [Fact]
+    public async Task Course_claims_match_by_the_id_the_hosts_parse_not_the_raw_value()
+    {
+        _passwords.Next = Password;
+        (await Run("create-user", "--username", "learner1", "--email", "l1@example.test", "--course", "1")).Should().Be(0, AllOutput);
+        // Values written outside the tool that the hosts read as course 2.
+        using (var scope = _provider.CreateScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var user = (await users.FindByNameAsync("learner1"))!;
+            await users.AddClaimsAsync(user, [new Claim(IntelligentlyClaims.CourseClaimType, "02"), new Claim(IntelligentlyClaims.CourseClaimType, " 2")]);
+            var principal = await scope.ServiceProvider.GetRequiredService<IUserClaimsPrincipalFactory<IdentityUser>>().CreateAsync(user);
+            principal.GetEnrolledCourseIds().Should().Equal(1, 2);
+        }
+
+        (await Run("grant-course", "--username", "learner1", "--course", "2")).Should().Be(0, AllOutput);
+        _output.ToString().Should().Contain("already enrolled in course 2");
+        (await CourseClaims("learner1")).Should().HaveCount(3, "no '2' claim is added beside '02'");
+
+        (await Run("revoke-course", "--username", "learner1", "--course", "2")).Should().Be(0, AllOutput);
+
+        (await CourseClaims("learner1")).Should().Equal("1");
+    }
+
     // ── add-instructor / remove-instructor ───────────────────────────────────────
 
     [Fact]
@@ -401,6 +425,21 @@ public sealed class AccountCommandsTests : IDisposable
         exit.Should().Be(2);
         built.Should().BeFalse();
         _error.ToString().Should().Contain("Usage:");
+    }
+
+    [Theory]
+    [InlineData("--password=hunter2-secret", "create-user", "--username", "x", "--email", "x@example.test")]  // before the command
+    [InlineData("hunter2-secret", "--username", "x")]                                                        // password typed as the command
+    [InlineData("grant-course", "--username", "x", "--course", "hunter2-secret")]                            // password in a value
+    [InlineData("create-user", "--username", "x", "--email", "x@example.test", "-p", "hunter2-secret")]
+    public async Task Usage_errors_never_repeat_a_token_that_could_be_a_password(params string[] args)
+    {
+        var exit = await CommandRunner.RunAsync(args, () => _provider, _passwords, _output, _error);
+
+        exit.Should().Be(2);
+        AllOutput.Should().NotContain("hunter2-secret");
+        _passwords.Calls.Should().Be(0);
+        (await UserCount()).Should().Be(0);
     }
 
     [Fact]
