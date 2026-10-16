@@ -14,8 +14,8 @@ public sealed class InterpretHandler : IStageHandler
         if (string.IsNullOrWhiteSpace(run.TaskType))
             return Fail("Task type is empty.");
 
-        if (string.IsNullOrWhiteSpace(run.UserId))
-            return Fail("Run has no user id; no principal, no tools.");
+        if (string.IsNullOrWhiteSpace(run.UserId) || !run.Principal.IsAuthenticated)
+            return Fail("Run has no principal; no principal, no tools.");
 
         JsonDocument spec;
         try

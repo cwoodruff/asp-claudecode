@@ -34,7 +34,8 @@ public sealed class LookupKnowledgeTool : IToolHandler
         ToolName,
         "Searches the course knowledge base (FAQs, known lab errors, misconceptions, best practices) and returns the best matching entries as JSON.",
         Schema,
-        ToolRiskLevel.ReadOnly);
+        ToolRiskLevel.ReadOnly,
+        CourseScopeArgument: "course_id");
 
     public async Task<ToolResult> ExecuteAsync(ToolCall call, CancellationToken ct = default)
     {

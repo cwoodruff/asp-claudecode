@@ -1,0 +1,53 @@
+@using System.Text.Json
+@using Intelligently.Core.Agents.Entities
+@model AgentApproval
+@{
+    string arguments;
+    try
+    {
+        using var doc = JsonDocument.Parse(Model.ToolCallJson);
+        arguments = doc.RootElement.TryGetProperty("Input", out var input)
+            ? JsonSerializer.Serialize(input, new JsonSerializerOptions { WriteIndented = true })
+            : Model.ToolCallJson;
+    }
+    catch (JsonException)
+    {
+        arguments = Model.ToolCallJson;
+    }
+}
+<tr id="approval-@Model.Id" class="approval approval-@Model.Status.ToLowerInvariant()" data-approval-status="@Model.Status">
+    <td>@Model.CreatedAt.ToString("u")</td>
+    <td>
+        <a href="/runs/@Model.RunId"><code>@Model.RunId</code></a>
+        @if (Model.Run is not null)
+        {
+            <br /><small>@Model.Run.TaskType · @Model.Run.UserId · course @Model.Run.CourseId</small>
+        }
+    </td>
+    <td><code>@Model.ToolName</code></td>
+    <td><pre class="arguments">@arguments</pre></td>
+    <td>@Model.Reason</td>
+    <td>
+        @if (Model.IsPending)
+        {
+            <form method="post" asp-page-handler="Approve" hx-post="/approvals?handler=Approve" hx-target="closest tr" hx-swap="outerHTML" class="decision">
+                <input type="hidden" name="id" value="@Model.Id" />
+                <input type="text" name="note" placeholder="Note (optional)" aria-label="Decision note" />
+                <button type="submit" class="approve">Approve</button>
+            </form>
+            <form method="post" asp-page-handler="Deny" hx-post="/approvals?handler=Deny" hx-target="closest tr" hx-swap="outerHTML" class="decision">
+                <input type="hidden" name="id" value="@Model.Id" />
+                <input type="text" name="note" placeholder="Reason (optional)" aria-label="Denial reason" />
+                <button type="submit" class="deny">Deny</button>
+            </form>
+        }
+        else
+        {
+            <p class="decided"><strong>@Model.Status</strong> by @Model.DecidedBy at @(Model.DecidedAt?.ToString("u"))</p>
+            @if (!string.IsNullOrWhiteSpace(Model.DecisionNote))
+            {
+                <p><em>@Model.DecisionNote</em></p>
+            }
+        }
+    </td>
+</tr>

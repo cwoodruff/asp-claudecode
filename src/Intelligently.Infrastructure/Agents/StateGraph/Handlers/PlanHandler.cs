@@ -47,6 +47,7 @@ public sealed class PlanHandler : IStageHandler
         var canonical = JsonSerializer.Serialize(plan);
         var stored = plan with
         {
+            Id = Guid.NewGuid(),
             RunId = run.Id,
             Revision = run.PlanRevision,
             Hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))),

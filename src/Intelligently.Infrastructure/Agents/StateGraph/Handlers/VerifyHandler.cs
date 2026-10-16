@@ -1,12 +1,14 @@
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
+using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Data;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 
 /// <summary>
-/// Verify: deterministic checks only in Phase 1 (schema contract and error flags).
-/// Ground-truth gates and model judgement arrive with later phases.
+/// Verify: deterministic checks only (required tool called, no error results).
+/// Ground-truth gates and model judgement arrive with later phases. A failure caused by a policy
+/// denial is final for that call, so Recover is told to replan instead of retrying.
 /// </summary>
 public sealed class VerifyHandler : IStageHandler
 {
@@ -39,11 +41,11 @@ public sealed class VerifyHandler : IStageHandler
                 return Fail(run, step, $"Step {planStep.Index} required tool '{planStep.Tool}' but it was not called.");
             var error = results.FirstOrDefault(r => r.IsError);
             if (error is not null)
-                return Fail(run, step, $"Tool '{error.Name}' failed: {error.Content}");
+                return Fail(run, step, $"Tool '{error.Name}' failed: {error.Content}", error);
         }
-        else if (results.Any(r => r.IsError))
+        else if (results.FirstOrDefault(r => r.IsError) is { } error)
         {
-            return Fail(run, step, $"A tool call failed: {results.First(r => r.IsError).Content}");
+            return Fail(run, step, $"A tool call failed: {error.Content}", error);
         }
         else if (string.IsNullOrWhiteSpace(step.AssistantText) && results.Count == 0)
         {
@@ -64,7 +66,7 @@ public sealed class VerifyHandler : IStageHandler
         return StageOutcome.To(AgentStage.Learn, $"Step {planStep.Index} passed; plan complete.");
     }
 
-    private static StageOutcome Fail(AgentRun run, AgentStep? step, string message)
+    private static StageOutcome Fail(AgentRun run, AgentStep? step, string message, ToolResult? error = null)
     {
         if (step is not null)
         {
@@ -72,7 +74,7 @@ public sealed class VerifyHandler : IStageHandler
             step.VerifierMessage = message;
             step.CompletedAt = DateTime.UtcNow;
         }
-        run.RecoveryReason = RecoveryReasons.StepFailed;
+        run.RecoveryReason = error?.IsPolicyDenial == true ? RecoveryReasons.PolicyDenied : RecoveryReasons.StepFailed;
         return StageOutcome.To(AgentStage.Recover, message);
     }
 }

@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using System.Text.Json;
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Infrastructure.Agents;
 
@@ -35,7 +37,13 @@ public static class AgentEndpoints
             if (request.TaskSpec.ValueKind != JsonValueKind.Object)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["taskSpec"] = ["The task spec must be a JSON object."] });
 
-            var run = await runs.CreateAsync(userId, request.CourseId, request.TaskType.Trim(), request.TaskSpec.GetRawText(), ct);
+            // The run acts as the caller: their roles when authenticated, enrolled in the requested course.
+            var roles = http.User.Identity?.IsAuthenticated == true
+                ? http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).Distinct().ToList()
+                : [RunPrincipal.LearnerRole];
+            var principal = new RunPrincipal { UserId = userId, Roles = roles, CourseScope = [request.CourseId] };
+
+            var run = await runs.CreateAsync(userId, request.CourseId, request.TaskType.Trim(), request.TaskSpec.GetRawText(), principal, ct);
             return Results.Created($"/agent/runs/{run.Id}", RunResponse.From(run));
         })
         .RequireRateLimiting("chat")

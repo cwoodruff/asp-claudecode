@@ -9,13 +9,15 @@ using Microsoft.Extensions.Options;
 namespace Intelligently.Infrastructure.Agents.Execution;
 
 /// <summary>
-/// Single entry point for side effects. Asks the Control Plane about every call
-/// before executing any, executes the allowed ones, and records each outcome as evidence.
+/// Single entry point for side effects. Asks the Control Plane about every call before executing
+/// any, executes the allowed ones (or returns the idempotency barrier's stored result for a replay),
+/// records covered results in the barrier, and writes each outcome as evidence.
 /// </summary>
 public sealed class ToolDispatcher : IToolDispatcher
 {
     private readonly IToolRegistry _registry;
     private readonly IPolicyDecisionPoint _pdp;
+    private readonly IIdempotencyBarrier _barrier;
     private readonly IEvidenceSink _evidence;
     private readonly AgentsOptions _options;
     private readonly ILogger<ToolDispatcher> _logger;
@@ -23,12 +25,14 @@ public sealed class ToolDispatcher : IToolDispatcher
     public ToolDispatcher(
         IToolRegistry registry,
         IPolicyDecisionPoint pdp,
+        IIdempotencyBarrier barrier,
         IEvidenceSink evidence,
         IOptions<AgentsOptions> options,
         ILogger<ToolDispatcher> logger)
     {
         _registry = registry;
         _pdp = pdp;
+        _barrier = barrier;
         _evidence = evidence;
         _options = options.Value;
         _logger = logger;
@@ -36,7 +40,7 @@ public sealed class ToolDispatcher : IToolDispatcher
 
     public async Task<DispatchResult> DispatchAsync(AgentRun run, IReadOnlyList<ToolCall> calls, CancellationToken ct = default)
     {
-        var principal = new RunPrincipal(run.UserId, run.CourseId, []);
+        var principal = run.Principal;
         var decisions = new List<(ToolCall Call, IToolHandler? Handler, PolicyDecision Decision)>(calls.Count);
 
         foreach (var call in calls)
@@ -47,23 +51,44 @@ public sealed class ToolDispatcher : IToolDispatcher
                 continue;
             }
 
-            var decision = await _pdp.EvaluateAsync(call, handler.Descriptor, principal, ct);
+            var decision = await _pdp.EvaluateAsync(new PolicyRequest(run, call, handler.Descriptor, principal), ct);
             if (decision.Verdict == PolicyVerdict.RequireApproval)
             {
                 _logger.LogInformation("Run {RunId}: tool {Tool} requires approval ({Reason})", run.Id, call.Name, decision.Reason);
-                return new DispatchResult([], RequiresApproval: true, decision.Reason);
+                return new DispatchResult([], RequiresApproval: true, decision.Reason, call);
             }
 
             decisions.Add((call, handler, decision));
         }
 
-        // Phase 1 executes sequentially: the single native tool shares the scoped DbContext.
+        // Sequential execution: native tools share the scoped DbContext.
         var results = new List<ToolResult>(calls.Count);
         foreach (var (call, handler, decision) in decisions)
         {
-            var result = decision.Verdict == PolicyVerdict.Allow && handler is not null
-                ? await ExecuteAsync(handler, call, ct)
-                : ToolResult.Error(call, $"Denied by policy: {decision.Reason}");
+            ToolResult result;
+            var replayed = false;
+
+            if (decision.Verdict == PolicyVerdict.Allow && handler is not null)
+            {
+                if (decision.ReplayedResult is { } stored)
+                {
+                    result = stored;
+                    replayed = true;
+                }
+                else
+                {
+                    result = await ExecuteAsync(handler, call, ct);
+                    if (decision.IdempotencyKey is not null)
+                        await _barrier.RecordAsync(run.Id, call, decision.IdempotencyKey, result, ct);
+                }
+            }
+            else
+            {
+                var reason = decision.Reason ?? "no reason given";
+                result = decision.RuleKind == PolicyRuleKind.RateLimit
+                    ? ToolResult.RateLimited(call, reason)
+                    : ToolResult.Denied(call, reason);
+            }
 
             result = Truncate(result);
             results.Add(result);
@@ -77,8 +102,11 @@ public sealed class ToolDispatcher : IToolDispatcher
                     call = new { call.Id, call.Name, input = call.Input },
                     decision = decision.Verdict.ToString(),
                     decisionReason = decision.Reason,
+                    rule = decision.Rule,
+                    ruleKind = decision.RuleKind?.ToString(),
                     riskLevel = handler?.Descriptor.RiskLevel.ToString(),
-                    result = new { result.IsError, result.Content },
+                    replayed,
+                    result = new { result.IsError, result.ErrorKind, result.Content },
                 }),
             }, ct);
         }

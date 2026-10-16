@@ -1,0 +1,33 @@
+@page "/approvals"
+@model Intelligently.Admin.Pages.Approvals.IndexModel
+@{
+    ViewData["Title"] = "Approvals";
+}
+<h1>Pending approvals</h1>
+<p class="text-muted">Tool calls the Control Plane will not run without an instructor's decision. Approving resumes the run at the same step; denying sends it to Recover, which replans without that tool.</p>
+
+@if (Model.Pending.Count == 0)
+{
+    <p id="no-approvals">No approvals are waiting.</p>
+}
+else
+{
+    <table class="approvals" id="approvals">
+        <thead>
+            <tr>
+                <th>Requested</th>
+                <th>Run</th>
+                <th>Tool</th>
+                <th>Arguments</th>
+                <th>Reason</th>
+                <th>Decision</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var approval in Model.Pending)
+            {
+                <partial name="_ApprovalRow" model="approval" />
+            }
+        </tbody>
+    </table>
+}

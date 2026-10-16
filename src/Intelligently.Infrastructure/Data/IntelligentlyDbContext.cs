@@ -20,6 +20,8 @@ public class IntelligentlyDbContext : IdentityDbContext
     public DbSet<AgentPlan>         AgentPlans         => Set<AgentPlan>();
     public DbSet<AgentTrace>        AgentTraces        => Set<AgentTrace>();
     public DbSet<AgentEpisode>      AgentEpisodes      => Set<AgentEpisode>();
+    public DbSet<AgentApproval>     AgentApprovals     => Set<AgentApproval>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

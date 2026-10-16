@@ -1,5 +1,11 @@
+using Intelligently.Core.Agents;
 using Intelligently.Core.Agents.Contracts;
+using Intelligently.Core.Agents.Entities;
+using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents.StateGraph;
+using Intelligently.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Intelligently.Web.Agents;
 
@@ -9,6 +15,14 @@ namespace Intelligently.Web.Agents;
 /// runs in its own DI scope so each one is committed independently and a crash
 /// resumes from the last committed stage.
 /// </summary>
+/// <remarks>
+/// The queue is in-process, so two things would otherwise be lost: runs that were Running when
+/// the process died, and runs whose approval was decided in the Admin process (which has no
+/// worker). A sweep task re-enqueues every Running run at startup and, every
+/// <see cref="AgentsOptions.ApprovalSweepSeconds"/>, every run that is Running at AwaitingApproval
+/// (that is, decided but not yet picked up). Enqueuing a run twice is harmless: a step on a run
+/// that is no longer Running returns it untouched.
+/// </remarks>
 public sealed class RunWorker : BackgroundService
 {
     /// <summary>Safety valve on top of the recovery budget; a healthy run needs far fewer stages.</summary>
@@ -16,18 +30,21 @@ public sealed class RunWorker : BackgroundService
 
     private readonly IRunQueue _queue;
     private readonly IServiceScopeFactory _scopes;
+    private readonly AgentsOptions _options;
     private readonly ILogger<RunWorker> _logger;
 
-    public RunWorker(IRunQueue queue, IServiceScopeFactory scopes, ILogger<RunWorker> logger)
+    public RunWorker(IRunQueue queue, IServiceScopeFactory scopes, IOptions<AgentsOptions> options, ILogger<RunWorker> logger)
     {
         _queue = queue;
         _scopes = scopes;
+        _options = options.Value;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("RunWorker started");
+        var sweep = SweepAsync(stoppingToken);
         try
         {
             await foreach (var runId in _queue.DequeueAllAsync(stoppingToken))
@@ -37,6 +54,7 @@ public sealed class RunWorker : BackgroundService
         {
             // normal shutdown
         }
+        await sweep;
         _logger.LogInformation("RunWorker stopped");
     }
 
@@ -70,5 +88,48 @@ public sealed class RunWorker : BackgroundService
         }
 
         _logger.LogWarning("Run {RunId} exceeded {Max} stages in one dequeue; parking it", runId, MaxStagesPerDequeue);
+    }
+
+    /// <summary>Startup resume of every Running run, then a periodic sweep for decided approvals.</summary>
+    private async Task SweepAsync(CancellationToken ct)
+    {
+        await Task.Yield();
+        await EnqueueAsync(r => r.Status == AgentRun.StatusRunning, "startup resume", ct);
+
+        var interval = TimeSpan.FromSeconds(_options.ApprovalSweepSeconds);
+        if (interval <= TimeSpan.Zero) return;
+
+        try
+        {
+            using var timer = new PeriodicTimer(interval);
+            while (await timer.WaitForNextTickAsync(ct))
+                await EnqueueAsync(r => r.Status == AgentRun.StatusRunning && r.Stage == AgentStage.AwaitingApproval, "approval sweep", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // normal shutdown
+        }
+    }
+
+    private async Task EnqueueAsync(System.Linq.Expressions.Expression<Func<AgentRun, bool>> filter, string why, CancellationToken ct)
+    {
+        List<Guid> ids;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IntelligentlyDbContext>();
+            ids = await db.AgentRuns.AsNoTracking().Where(filter).Select(r => r.Id).ToListAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "RunWorker {Why} could not query runs; will try again", why);
+            return;
+        }
+
+        foreach (var id in ids)
+            await _queue.EnqueueAsync(id, ct);
+
+        if (ids.Count > 0)
+            _logger.LogInformation("RunWorker {Why}: re-enqueued {Count} run(s)", why, ids.Count);
     }
 }

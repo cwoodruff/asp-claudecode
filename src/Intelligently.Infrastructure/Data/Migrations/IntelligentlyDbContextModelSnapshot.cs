@@ -22,6 +22,70 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentApproval", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ArgsHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DecidedBy")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("DecisionNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("EscalationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("StepId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToolCallJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EscalationId");
+
+                    b.HasIndex("RunId", "CreatedAt");
+
+                    b.HasIndex("Status", "CreatedAt");
+
+                    b.HasIndex("RunId", "ToolName", "ArgsHash");
+
+                    b.ToTable("AgentApprovals", (string)null);
+                });
+
             modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentEpisode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -292,6 +356,48 @@ namespace Intelligently.Infrastructure.Data.Migrations
                     b.HasIndex("RunId", "CreatedAt");
 
                     b.ToTable("AgentTraces", (string)null);
+                });
+
+            modelBuilder.Entity("Intelligently.Core.Agents.Entities.IdempotencyRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ArgsHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsError")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ResultJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToolCallId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ToolName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId", "ToolName", "ArgsHash")
+                        .IsUnique();
+
+                    b.ToTable("AgentIdempotencyRecords", (string)null);
                 });
 
             modelBuilder.Entity("Intelligently.Core.Entities.AI.AIAnalyticsEvent", b =>
@@ -762,6 +868,24 @@ namespace Intelligently.Infrastructure.Data.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentApproval", b =>
+                {
+                    b.HasOne("Intelligently.Core.Entities.AI.AIEscalation", "Escalation")
+                        .WithMany()
+                        .HasForeignKey("EscalationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Intelligently.Core.Agents.Entities.AgentRun", "Run")
+                        .WithMany("Approvals")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Escalation");
+
+                    b.Navigation("Run");
+                });
+
             modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentPlan", b =>
                 {
                     b.HasOne("Intelligently.Core.Agents.Entities.AgentRun", null)
@@ -773,6 +897,35 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentRun", b =>
                 {
+                    b.OwnsOne("Intelligently.Core.Agents.Contracts.RunPrincipal", "Principal", b1 =>
+                        {
+                            b1.Property<Guid>("AgentRunId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<string>("CourseScope")
+                                .IsRequired()
+                                .HasColumnType("nvarchar(max)")
+                                .HasColumnName("Principal_CourseScopeJson");
+
+                            b1.Property<string>("Roles")
+                                .IsRequired()
+                                .HasColumnType("nvarchar(max)")
+                                .HasColumnName("Principal_RolesJson");
+
+                            b1.Property<string>("UserId")
+                                .IsRequired()
+                                .HasMaxLength(450)
+                                .HasColumnType("nvarchar(450)")
+                                .HasColumnName("Principal_UserId");
+
+                            b1.HasKey("AgentRunId");
+
+                            b1.ToTable("AgentRuns");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AgentRunId");
+                        });
+
                     b.OwnsOne("Intelligently.Core.Agents.StateGraph.RecoveryBudget", "Budget", b1 =>
                         {
                             b1.Property<Guid>("AgentRunId")
@@ -808,6 +961,9 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.Navigation("Budget")
                         .IsRequired();
+
+                    b.Navigation("Principal")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentStep", b =>
@@ -825,6 +981,17 @@ namespace Intelligently.Infrastructure.Data.Migrations
                 {
                     b.HasOne("Intelligently.Core.Agents.Entities.AgentRun", "Run")
                         .WithMany("Traces")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+                });
+
+            modelBuilder.Entity("Intelligently.Core.Agents.Entities.IdempotencyRecord", b =>
+                {
+                    b.HasOne("Intelligently.Core.Agents.Entities.AgentRun", "Run")
+                        .WithMany()
                         .HasForeignKey("RunId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -906,6 +1073,8 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Intelligently.Core.Agents.Entities.AgentRun", b =>
                 {
+                    b.Navigation("Approvals");
+
                     b.Navigation("Plans");
 
                     b.Navigation("Steps");

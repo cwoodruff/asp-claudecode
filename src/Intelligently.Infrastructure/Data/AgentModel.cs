@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Intelligently.Core.Agents.Entities;
+using Intelligently.Core.Entities.AI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -23,6 +24,7 @@ internal static class AgentModel
             e.Property(x => x.TotalCostUsd).HasPrecision(12, 6);
             e.Property(x => x.ConcurrencyStamp).IsConcurrencyToken();
             e.Ignore(x => x.IsActive);
+            e.Ignore(x => x.IsWaitingForApproval);
             e.HasIndex(x => new { x.Status, x.Stage });
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
 
@@ -39,9 +41,23 @@ internal static class AgentModel
             });
             e.Navigation(x => x.Budget).IsRequired();
 
+            e.OwnsOne(x => x.Principal, principal =>
+            {
+                principal.Property(p => p.UserId).HasColumnName("Principal_UserId").HasMaxLength(450);
+                principal.Property(p => p.Roles)
+                    .HasColumnName("Principal_RolesJson")
+                    .HasConversion(JsonListConverter<string>(), JsonListComparer<string>());
+                principal.Property(p => p.CourseScope)
+                    .HasColumnName("Principal_CourseScopeJson")
+                    .HasConversion(JsonListConverter<int>(), JsonListComparer<int>());
+                principal.Ignore(p => p.IsAuthenticated);
+            });
+            e.Navigation(x => x.Principal).IsRequired();
+
             e.HasMany(x => x.Steps).WithOne(s => s.Run).HasForeignKey(s => s.RunId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Plans).WithOne().HasForeignKey(p => p.RunId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Traces).WithOne(t => t.Run).HasForeignKey(t => t.RunId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Approvals).WithOne(a => a.Run).HasForeignKey(a => a.RunId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<AgentStep>(e =>
@@ -91,5 +107,41 @@ internal static class AgentModel
             e.HasIndex(x => x.RunId).IsUnique();
             e.HasIndex(x => new { x.UserId, x.TaskType, x.CreatedAt });
         });
+
+        b.Entity<AgentApproval>(e =>
+        {
+            e.ToTable("AgentApprovals");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.ToolName).HasMaxLength(200);
+            e.Property(x => x.ArgsHash).HasMaxLength(64);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.DecidedBy).HasMaxLength(450);
+            e.Ignore(x => x.IsPending);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+            e.HasIndex(x => new { x.RunId, x.CreatedAt });
+            e.HasIndex(x => new { x.RunId, x.ToolName, x.ArgsHash });
+            e.HasOne(x => x.Escalation).WithMany()
+                .HasForeignKey(x => x.EscalationId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<IdempotencyRecord>(e =>
+        {
+            e.ToTable("AgentIdempotencyRecords");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.ToolName).HasMaxLength(200);
+            e.Property(x => x.ArgsHash).HasMaxLength(64);
+            e.Property(x => x.ToolCallId).HasMaxLength(100);
+            e.HasIndex(x => new { x.RunId, x.ToolName, x.ArgsHash }).IsUnique();
+            e.HasOne(x => x.Run).WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
+
+    private static ValueConverter<IReadOnlyList<T>, string> JsonListConverter<T>() => new(
+        list => JsonSerializer.Serialize(list, (JsonSerializerOptions?)null),
+        json => JsonSerializer.Deserialize<List<T>>(json, (JsonSerializerOptions?)null) ?? new List<T>());
+
+    private static ValueComparer<IReadOnlyList<T>> JsonListComparer<T>() => new(
+        (a, c) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(c, (JsonSerializerOptions?)null),
+        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
+        v => JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)!);
 }
