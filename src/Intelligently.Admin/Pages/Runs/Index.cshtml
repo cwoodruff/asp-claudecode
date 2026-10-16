@@ -1,0 +1,32 @@
+@page "/runs"
+@model Intelligently.Admin.Pages.Runs.IndexModel
+@{
+    ViewData["Title"] = "Agent runs";
+}
+<h1>Agent runs</h1>
+@if (Model.Runs.Count == 0)
+{
+    <p>No runs yet.</p>
+}
+else
+{
+    <table id="runs">
+        <thead>
+            <tr><th>Created</th><th>Run</th><th>User</th><th>Task</th><th>Stage</th><th>Status</th><th>Plan rev.</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var run in Model.Runs)
+            {
+                <tr data-run-status="@run.Status">
+                    <td>@run.CreatedAt.ToString("u")</td>
+                    <td><a href="/runs/@run.Id"><code>@run.Id</code></a></td>
+                    <td>@run.UserId</td>
+                    <td>@run.TaskType</td>
+                    <td>@run.Stage</td>
+                    <td>@run.Status</td>
+                    <td>@run.PlanRevision</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

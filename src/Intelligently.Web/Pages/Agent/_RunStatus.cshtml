@@ -1,0 +1,30 @@
+@using Intelligently.Core.Agents.Entities
+@using Intelligently.Core.Agents.StateGraph
+@model AgentRun
+@{
+    // Keep polling while the run is active or parked for approval, so a decision made in Admin shows up here.
+    var polling = Model.Status is AgentRun.StatusRunning or AgentRun.StatusWaiting;
+}
+<div id="run-@Model.Id" class="agent-run agent-run-@Model.Status.ToLowerInvariant()"
+     @if (polling) { <text>hx-get="/agent/runs/@Model.Id" hx-trigger="every 2s" hx-swap="outerHTML"</text> }>
+    <dl>
+        <dt>Run</dt><dd><code>@Model.Id</code></dd>
+        <dt>Task</dt><dd>@Model.TaskType</dd>
+        <dt>Stage</dt><dd data-stage="@Model.Stage">@Model.Stage</dd>
+        <dt>Status</dt><dd data-status="@Model.Status">@Model.Status</dd>
+        <dt>Plan revision</dt><dd>@Model.PlanRevision (step @Model.CurrentStepIndex)</dd>
+        <dt>Budget</dt><dd>replans @Model.Budget.ReplansLeft · retries @Model.Budget.RetriesLeft · tool calls @Model.Budget.ToolCallsLeft · tokens @Model.Budget.TokensLeft</dd>
+        @if (Model.Stage == AgentStage.AwaitingApproval)
+        {
+            <dt>Approval</dt><dd>Waiting for an instructor to approve or deny a tool call.</dd>
+        }
+        @if (!string.IsNullOrWhiteSpace(Model.StatusReason))
+        {
+            <dt>Last transition</dt><dd>@Model.StatusReason</dd>
+        }
+        @if (Model.CompletedAt is not null)
+        {
+            <dt>Finished</dt><dd>@Model.CompletedAt.Value.ToString("u")</dd>
+        }
+    </dl>
+</div>
