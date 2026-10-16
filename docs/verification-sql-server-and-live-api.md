@@ -86,8 +86,11 @@ database to be re-enqueued on every start.
 Everything else the run needs is ready:
 
 - Database and accounts as above. `CandidateSearch` stays on for `LabErrorDiagnosis` in
-  `appsettings.Development.json`; **set `Agents:CandidateSearch:TaskTypes` to `[]` for the smoke run** (user
-  secrets or an `Agents__CandidateSearch__TaskTypes=` override) so the run is a single planner call.
+  `appsettings.Development.json`; **set `Agents:CandidateSearch:Candidates` to `1` for the smoke run** (user
+  secrets or an `Agents__CandidateSearch__Candidates=1` override) so the run is a single planner call.
+  `IsEnabledFor` requires more than one candidate, so that value turns the search off; overriding
+  `TaskTypes` with an empty value does not, because configuration arrays merge by index and
+  `TaskTypes:0` from the Development file survives.
 - Docker Desktop is running and `mcr.microsoft.com/dotnet/sdk:10.0` (1.3 GB) is pulled. The first two pulls
   failed with an `EOF` from Docker Desktop's proxy to Microsoft's registry while Docker Hub pulls worked; the
   third attempt succeeded, so it was transient. The real `DockerSandbox` is the default `ISandbox`; nothing
