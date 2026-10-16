@@ -50,8 +50,18 @@ public sealed class AgentRun
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 
-    /// <summary>Optimistic concurrency token, regenerated on every commit so a second worker instance cannot double-process a run.</summary>
+    /// <summary>Optimistic concurrency token, regenerated on every commit; together with the lease it stops a second worker instance from double-processing a run.</summary>
     public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Worker holding the stage lease (machine name plus process id), or null when no stage is executing.
+    /// A stage handler only runs under a claim taken with a conditional UPDATE before it starts, so two
+    /// workers cannot execute the same stage (and its tool side effects) at once.
+    /// </summary>
+    public string? ClaimedBy { get; set; }
+
+    /// <summary>When the lease expires (UTC). An expired lease may be taken over by another worker, so a crashed worker never parks a run forever.</summary>
+    public DateTime? ClaimedUntil { get; set; }
 
     public ICollection<AgentStep> Steps { get; set; } = [];
     public ICollection<AgentPlan> Plans { get; set; } = [];
@@ -59,6 +69,9 @@ public sealed class AgentRun
     public ICollection<AgentApproval> Approvals { get; set; } = [];
 
     public bool IsActive => Status == StatusRunning;
+
+    /// <summary>True while a worker holds an unexpired lease on the run.</summary>
+    public bool HasLiveClaim(DateTime utcNow) => ClaimedUntil is { } until && until > utcNow;
 
     /// <summary>Parked at <see cref="AgentStage.AwaitingApproval"/> waiting for a human decision.</summary>
     public bool IsWaitingForApproval => Stage == AgentStage.AwaitingApproval && Status == StatusWaiting;
