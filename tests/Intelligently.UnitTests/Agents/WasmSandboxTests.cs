@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using Intelligently.Core.Agents;
 using Intelligently.Core.Agents.Contracts;
@@ -93,16 +94,23 @@ public class WasmSandboxTests
         result.Error.Should().Contain("fuel");
     }
 
+    /// <summary>
+    /// Fuel is unlimited here so the epoch deadline is the only thing that can stop the loop: the epoch is
+    /// advanced by a thread-pool timer, and under a fully parallel test run its callbacks can lag enough for
+    /// the default fuel budget to run out first (a fuel trap, which the sibling test covers). The wall-clock
+    /// margin is wide for the same reason; the sandbox's own limit is still the 300 ms timeout.
+    /// </summary>
     [Fact]
     public async Task Epoch_deadline_stops_an_endless_loop_within_the_wall_clock_limit()
     {
-        var started = DateTime.UtcNow;
+        var started = Stopwatch.StartNew();
 
-        var result = await Sandbox().RunAsync(Request(SpinModule) with { Timeout = TimeSpan.FromMilliseconds(300) });
+        var result = await Sandbox(fuel: long.MaxValue).RunAsync(Request(SpinModule) with { Timeout = TimeSpan.FromMilliseconds(300) });
 
         result.TimedOut.Should().BeTrue();
+        result.ExitCode.Should().BeNull();
         result.Error.Should().Contain("limit");
-        (DateTime.UtcNow - started).Should().BeLessThan(TimeSpan.FromSeconds(5));
+        started.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(20));
     }
 
     [Fact]

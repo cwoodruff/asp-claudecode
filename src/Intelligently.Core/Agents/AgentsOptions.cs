@@ -166,7 +166,9 @@ public sealed class AgentsOptions
         /// </summary>
         public Dictionary<string, string[]> Languages { get; set; } = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["csharp"] = ["dotnet", "run", "{entrypoint}"],
+            // -p:PublishAot=false: a .NET 10 file-based app defaults to PublishAot, which restores the ILCompiler
+            // package from nuget.org; the sandbox has no network, so the build would fail before compiling the lab.
+            ["csharp"] = ["dotnet", "run", "{entrypoint}", "-p:PublishAot=false"],
             ["csproj"] = ["dotnet", "run", "--project", "{entrypoint}"],
             ["fsharp"] = ["dotnet", "fsi", "{entrypoint}"],
             ["shell"] = ["sh", "{entrypoint}"],
