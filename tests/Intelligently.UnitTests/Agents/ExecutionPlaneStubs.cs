@@ -126,7 +126,7 @@ public static class DockerAvailability
         try
         {
             using var client = DockerSandbox.CreateClient();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             client.System.PingAsync(timeout.Token).GetAwaiter().GetResult();
             return null;
         }

@@ -14,9 +14,10 @@ public abstract class NativeTool<TInput, TOutput> : IToolHandler
     private static readonly JsonElement InputSchema = JsonSerializer.SerializeToElement(AgentJsonSchema.ForNode<TInput>());
     private static readonly JsonElement OutputSchema = JsonSerializer.SerializeToElement(AgentJsonSchema.ForNode<TOutput>());
 
-    protected NativeTool(string name, string description, ToolRiskLevel riskLevel, string? courseScopeArgument)
+    /// <param name="exclusive">True for a tool that writes through the stage's DbContext; it then runs alone, after the concurrent calls.</param>
+    protected NativeTool(string name, string description, ToolRiskLevel riskLevel, string? courseScopeArgument, bool exclusive = false)
     {
-        Descriptor = new ToolDescriptor(name, description, InputSchema, riskLevel, courseScopeArgument, OutputSchema);
+        Descriptor = new ToolDescriptor(name, description, InputSchema, riskLevel, courseScopeArgument, OutputSchema, Exclusive: exclusive);
     }
 
     public ToolDescriptor Descriptor { get; }

@@ -2,8 +2,9 @@ namespace Intelligently.Core.Agents.Tools;
 
 /// <summary>
 /// Executes one tool. Implementations live in the Execution Plane and never decide their own permission.
-/// Handlers may run concurrently with the other calls of the same assistant turn, so a handler that
-/// needs scoped services (the DbContext) must open its own scope rather than share the dispatcher's.
+/// Handlers run concurrently with the other calls of the same assistant turn unless their descriptor is
+/// <see cref="ToolDescriptor.Exclusive"/>, which is what a handler that writes through the stage's
+/// DbContext must declare.
 /// </summary>
 public interface IToolHandler
 {

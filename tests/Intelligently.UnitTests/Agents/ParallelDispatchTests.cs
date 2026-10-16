@@ -220,7 +220,7 @@ public class ParallelDispatchTests
     }
 
     [Fact]
-    public async Task Native_mutating_tools_write_in_their_own_scope_and_the_notification_needs_approval()
+    public async Task Native_mutating_tools_write_through_the_stage_scope_and_the_notification_needs_approval()
     {
         using var host = new AgentTestHost();
         var run = await host.CreateRunAsync(userId: "learner-9");
@@ -250,5 +250,28 @@ public class ParallelDispatchTests
         var notified = await dispatcher.DispatchAsync(run, [notify]);
         notified.RequiresApproval.Should().BeTrue("External tools always need approval");
         notified.PendingCall!.Name.Should().Be(NotifyLearnerTool.ToolName);
+    }
+
+    [Fact]
+    public async Task Identical_covered_calls_in_one_turn_execute_once_and_every_call_gets_the_result()
+    {
+        var notes = new StubTool("update_notes", ToolRiskLevel.Mutating);
+        using var host = new AgentTestHost(s => s.UseTools(notes));
+        var run = await host.CreateRunAsync();
+
+        using var scope = host.Provider.CreateScope();
+        var dispatch = await scope.ServiceProvider.GetRequiredService<IToolDispatcher>().DispatchAsync(run, [
+            StubTool.Call("update_notes", 7, text: "same", id: "toolu_1"),
+            StubTool.Call("update_notes", 7, text: "same", id: "toolu_2"),
+            StubTool.Call("update_notes", 7, text: "different", id: "toolu_3"),
+        ]);
+
+        notes.Executions.Should().Be(2, "the two identical calls share one execution");
+        dispatch.Results.Select(r => r.ToolCallId).Should().Equal("toolu_1", "toolu_2", "toolu_3");
+        dispatch.Results.Should().OnlyContain(r => !r.IsError);
+        dispatch.Results[1].Content.Should().Be(dispatch.Results[0].Content);
+        dispatch.Results[2].Content.Should().NotBe(dispatch.Results[0].Content);
+        var receipts = scope.ServiceProvider.GetRequiredService<Intelligently.Infrastructure.Data.IntelligentlyDbContext>().IdempotencyRecords.Local;
+        receipts.Should().HaveCount(2, "one receipt per distinct argument hash");
     }
 }

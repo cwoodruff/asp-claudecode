@@ -117,4 +117,23 @@ public class KnowledgeRetrieverTests
         first.GetProperty("question").GetString().Should().Be("What does CS0246 mean?");
         first.GetProperty("score").GetDouble().Should().BeGreaterThan(0);
     }
+
+    [Fact]
+    public async Task Lookup_knowledge_with_a_null_course_stays_inside_the_run_course()
+    {
+        using var host = new AgentTestHost();
+        await SeedAsync(host);
+        using var scope = host.Provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IToolRegistry>().TryGetHandler(LookupKnowledgeTool.ToolName, out var handler).Should().BeTrue();
+
+        var result = await handler.ExecuteAsync(new ToolCall("toolu_1", LookupKnowledgeTool.ToolName,
+            JsonSerializer.SerializeToElement(new { query = "CS0246", course_id = (int?)null, module_id = (int?)null })), StubTool.Context(courseId: 7));
+
+        result.IsError.Should().BeFalse();
+        using var doc = JsonDocument.Parse(result.Content);
+        doc.RootElement.GetProperty("courseId").GetInt32().Should().Be(7, "a null course means the run's course, never every course");
+        var questions = doc.RootElement.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("question").GetString()).ToList();
+        questions.Should().Contain("What does CS0246 mean?").And.Contain("General note on namespace errors");
+        questions.Should().NotContain("CS0246 in another course");
+    }
 }

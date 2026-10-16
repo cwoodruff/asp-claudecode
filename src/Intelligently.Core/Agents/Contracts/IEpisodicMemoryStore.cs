@@ -14,8 +14,10 @@ public interface IEpisodicMemoryStore
     Task<AgentEpisode> WriteAsync(AgentRun run, string outcome, string summary, IReadOnlyDictionary<string, int> toolUsage, CancellationToken ct = default);
 
     /// <summary>
-    /// The most recent and most similar episodes of <paramref name="taskType"/>: this learner's episodes
-    /// first (by similarity to <paramref name="taskText"/>, then recency), then other learners'.
+    /// The most recent and most similar episodes of <paramref name="taskType"/> within
+    /// <paramref name="courseId"/>: this learner's episodes first (by similarity to <paramref name="taskText"/>,
+    /// then recency), then other learners' of the same course. Episodes of other courses are never recalled,
+    /// so a run only ever sees material its course scope allows.
     /// </summary>
-    Task<IReadOnlyList<EpisodeMatch>> RecallAsync(string userId, string taskType, string taskText, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<EpisodeMatch>> RecallAsync(string userId, int courseId, string taskType, string taskText, int limit, CancellationToken ct = default);
 }

@@ -1,13 +1,14 @@
 using System.Text.Json;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Tools;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Intelligently.Infrastructure.Agents.Execution;
 
 /// <summary>
 /// ReadOnly native tool: scored retrieval over active <c>AIKnowledgeEntry</c> rows through the Context
-/// Plane retriever. Each execution opens its own scope so several lookups in one turn can run concurrently.
+/// Plane retriever. An omitted or null <c>course_id</c> means the run's own course (plus course-less
+/// entries), never every course, so the lookup stays inside the principal's enrolment. Exclusive: it
+/// reads through the stage's DbContext, so it runs after the turn's concurrent calls.
 /// </summary>
 public sealed class LookupKnowledgeTool : IToolHandler
 {
@@ -20,18 +21,18 @@ public sealed class LookupKnowledgeTool : IToolHandler
         properties = new
         {
             query = new { type = "string", description = "Keywords or a short phrase to search for in the knowledge base." },
-            course_id = new { type = new[] { "integer", "null" }, description = "Restrict results to this course, or null for all courses." },
+            course_id = new { type = new[] { "integer", "null" }, description = "Restrict results to this course, or null for the run's own course." },
             module_id = new { type = new[] { "integer", "null" }, description = "Restrict results to this module within the course, or null for all modules." },
         },
         required = new[] { "query", "course_id", "module_id" },
         additionalProperties = false,
     });
 
-    private readonly IServiceScopeFactory _scopes;
+    private readonly IKnowledgeRetriever _retriever;
 
-    public LookupKnowledgeTool(IServiceScopeFactory scopes)
+    public LookupKnowledgeTool(IKnowledgeRetriever retriever)
     {
-        _scopes = scopes;
+        _retriever = retriever;
     }
 
     public ToolDescriptor Descriptor { get; } = new(
@@ -39,7 +40,8 @@ public sealed class LookupKnowledgeTool : IToolHandler
         "Searches the course knowledge base (FAQs, known lab errors, misconceptions, best practices) and returns the best matching entries as JSON with a relevance score.",
         Schema,
         ToolRiskLevel.ReadOnly,
-        CourseScopeArgument: "course_id");
+        CourseScopeArgument: "course_id",
+        Exclusive: true);
 
     public async Task<ToolResult> ExecuteAsync(ToolCall call, ToolContext context, CancellationToken ct = default)
     {
@@ -52,12 +54,10 @@ public sealed class LookupKnowledgeTool : IToolHandler
         }
 
         var query = queryElement.GetString()!.Trim();
-        var courseId = IntegerArgument(call.Input, "course_id");
+        var courseId = IntegerArgument(call.Input, "course_id") ?? context.CourseId;
         var moduleId = IntegerArgument(call.Input, "module_id");
 
-        using var scope = _scopes.CreateScope();
-        var retriever = scope.ServiceProvider.GetRequiredService<IKnowledgeRetriever>();
-        var matches = await retriever.SearchAsync(query, courseId, moduleId, MaxResults, ct);
+        var matches = await _retriever.SearchAsync(query, courseId, moduleId, MaxResults, ct);
         var entries = matches.Select(m => new
         {
             id = m.Entry.Id,
@@ -68,7 +68,7 @@ public sealed class LookupKnowledgeTool : IToolHandler
             score = m.Score,
         }).ToList();
 
-        return ToolResult.Ok(call, JsonSerializer.Serialize(new { query, count = entries.Count, entries }));
+        return ToolResult.Ok(call, JsonSerializer.Serialize(new { query, courseId, count = entries.Count, entries }));
     }
 
     private static int? IntegerArgument(JsonElement input, string name) =>

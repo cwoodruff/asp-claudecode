@@ -10,6 +10,8 @@ namespace Intelligently.Core.Agents.Tools;
 /// present, is the JSON Schema the dispatcher validates every successful result against before Verify
 /// sees it. <see cref="Strict"/> asks the provider to validate tool inputs against the schema; it is off
 /// for schemas that do not meet the strict-mode rules (closed objects, every property required).
+/// <see cref="Exclusive"/> marks a tool that runs alone, after the concurrent calls of the turn, on the
+/// stage's own unit of work, so its rows commit atomically with the stage and its idempotency receipt.
 /// </summary>
 public sealed record ToolDescriptor(
     string Name,
@@ -18,7 +20,8 @@ public sealed record ToolDescriptor(
     ToolRiskLevel RiskLevel,
     string? CourseScopeArgument = null,
     JsonElement? OutputSchema = null,
-    bool Strict = true)
+    bool Strict = true,
+    bool Exclusive = false)
 {
     /// <summary>The course id the call targets, when the tool is course-scoped and the argument is a number.</summary>
     public int? CourseIdOf(ToolCall call)
