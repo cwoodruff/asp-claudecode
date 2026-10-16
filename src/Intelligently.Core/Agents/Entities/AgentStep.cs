@@ -31,6 +31,12 @@ public sealed class AgentStep
     /// <summary>JSON array of normalized tool results captured by Observe.</summary>
     public string? ToolResultsJson { get; set; }
 
+    /// <summary>The model response content blocks of this step as JSON, replayed verbatim on later turns so signed blocks (thinking, compaction) survive.</summary>
+    public string? ResponseContentJson { get; set; }
+
+    /// <summary>Input tokens of the prompt envelope sent for this step, as counted by the token budgeter.</summary>
+    public int? PromptTokens { get; set; }
+
     /// <summary>Verifier verdict message.</summary>
     public string? VerifierMessage { get; set; }
 

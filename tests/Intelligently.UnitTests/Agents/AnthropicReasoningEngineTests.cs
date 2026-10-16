@@ -14,15 +14,18 @@ namespace Intelligently.UnitTests.Agents;
 /// <summary>Wire-format checks for the Intelligence Plane against a fake HTTP handler.</summary>
 public class AnthropicReasoningEngineTests
 {
-    private static (AnthropicReasoningEngine Engine, FakeAnthropicHandler Handler) Build(string responseJson)
+    internal static (AnthropicReasoningEngine Engine, FakeAnthropicHandler Handler) Build(Func<HttpRequestMessage, HttpResponseMessage> responder)
     {
-        var handler = new FakeAnthropicHandler(_ => FakeAnthropicHandler.Json(responseJson));
+        var handler = new FakeAnthropicHandler(responder);
         var client = new AnthropicClient { ApiKey = "test-key", HttpClient = new HttpClient(handler), MaxRetries = 0 };
         var engine = new AnthropicReasoningEngine(client, Options.Create(new AgentsOptions()));
         return (engine, handler);
     }
 
-    private static readonly ToolDescriptor LookupTool = new(
+    private static (AnthropicReasoningEngine Engine, FakeAnthropicHandler Handler) Build(string responseJson) =>
+        Build(_ => FakeAnthropicHandler.Json(responseJson));
+
+    internal static readonly ToolDescriptor LookupTool = new(
         "lookup_knowledge",
         "Search the knowledge base.",
         JsonSerializer.SerializeToElement(new
@@ -34,12 +37,15 @@ public class AnthropicReasoningEngineTests
         }),
         ToolRiskLevel.ReadOnly);
 
-    private static PromptEnvelope Envelope() => new(
+    internal static PromptEnvelope Envelope() => new(
         "You are a tutor.",
         [LookupTool],
-        [new PromptMessage("user", "Plan it.")]);
+        [
+            new PromptMessage("user", "Plan it."),
+            new PromptMessage("system", "Produce the plan now.", PromptSection.Instruction),
+        ]);
 
-    private static string Response(string contentJson, string stopReason = "end_turn") => $$"""
+    internal static string Response(string contentJson, string stopReason = "end_turn") => $$"""
         {
           "id": "msg_01", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
           "content": {{contentJson}},
@@ -60,12 +66,12 @@ public class AnthropicReasoningEngineTests
         result.Plan!.Goal.Should().Be("Explain CS0246");
         result.Plan.Steps.Should().ContainSingle().Which.Tool.Should().Be("lookup_knowledge");
         result.Usage.Should().Be(new ModelUsage("claude-opus-5-5", 300, 50, 200, 0));
+        result.ContentJson.Should().Contain("\"type\":\"text\"");
 
         using var body = JsonDocument.Parse(handler.LastRequestBody!);
         var root = body.RootElement;
         root.GetProperty("model").GetString().Should().Be("claude-opus-5-5");
         root.GetProperty("thinking").GetProperty("type").GetString().Should().Be("adaptive");
-        root.GetProperty("system").GetString().Should().Be("You are a tutor.");
         var outputConfig = root.GetProperty("output_config");
         outputConfig.GetProperty("effort").GetString().Should().Be("high");
         var format = outputConfig.GetProperty("format");
@@ -73,7 +79,10 @@ public class AnthropicReasoningEngineTests
         var schema = format.GetProperty("schema");
         schema.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
         schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo("goal", "steps");
-        root.TryGetProperty("tools", out _).Should().BeFalse("planning uses structured output, not tools");
+        // The tool list is sent on every stage so the cached prefix is identical; planning just may not call them.
+        root.GetProperty("tools").EnumerateArray().Should().HaveCount(1);
+        root.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("none");
+        handler.LastRequest!.Headers.Contains("anthropic-beta").Should().BeFalse("no compaction was requested");
     }
 
     [Fact]
@@ -105,6 +114,8 @@ public class AnthropicReasoningEngineTests
         call.Id.Should().Be("toolu_01");
         call.Name.Should().Be("lookup_knowledge");
         call.Input.GetProperty("query").GetString().Should().Be("CS0246");
+        using (var content = JsonDocument.Parse(result.ContentJson!))
+            content.RootElement.EnumerateArray().Select(b => b.GetProperty("type").GetString()).Should().Equal("text", "tool_use");
 
         using var body = JsonDocument.Parse(handler.LastRequestBody!);
         var root = body.RootElement;
@@ -114,10 +125,47 @@ public class AnthropicReasoningEngineTests
         var tool = root.GetProperty("tools").EnumerateArray().Single();
         tool.GetProperty("name").GetString().Should().Be("lookup_knowledge");
         tool.GetProperty("strict").GetBoolean().Should().BeTrue();
+        tool.GetProperty("cache_control").GetProperty("type").GetString().Should().Be("ephemeral", "the last tool carries a cache breakpoint");
         var inputSchema = tool.GetProperty("input_schema");
         inputSchema.GetProperty("type").GetString().Should().Be("object");
         inputSchema.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
         inputSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().Equal("query");
+    }
+
+    [Fact]
+    public async Task System_blocks_carry_cache_control_and_the_stage_instruction_travels_inside_messages()
+    {
+        var (engine, handler) = Build(Response("""[{"type":"text","text":"ok"}]"""));
+
+        await engine.DecideAsync(Envelope());
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var root = body.RootElement;
+        var system = root.GetProperty("system");
+        system.ValueKind.Should().Be(JsonValueKind.Array);
+        var block = system.EnumerateArray().Single();
+        block.GetProperty("text").GetString().Should().Be("You are a tutor.");
+        block.GetProperty("cache_control").GetProperty("type").GetString().Should().Be("ephemeral");
+        system.GetRawText().Should().NotContain("Produce the plan now.", "the volatile instruction must not touch the cached system field");
+
+        var messages = root.GetProperty("messages").EnumerateArray().ToList();
+        messages.Select(m => m.GetProperty("role").GetString()).Should().Equal("user", "system");
+        messages[1].GetProperty("content").EnumerateArray().Single().GetProperty("text").GetString().Should().Be("Produce the plan now.");
+    }
+
+    [Fact]
+    public async Task JudgeAsync_inserts_the_rubric_before_the_trailing_stage_instruction()
+    {
+        var (engine, handler) = Build(Response("""[{"type":"text","text":"{\"passed\":true,\"score\":0.9,\"rationale\":\"fine\"}"}]"""));
+
+        var result = await engine.JudgeAsync(Envelope(), "Must cite the knowledge base.");
+
+        result.Passed.Should().BeTrue();
+        result.Score.Should().Be(0.9);
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var roles = body.RootElement.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("role").GetString()).ToList();
+        roles.Should().Equal("user", "user", "system");
+        body.RootElement.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be("none");
     }
 
     [Fact]

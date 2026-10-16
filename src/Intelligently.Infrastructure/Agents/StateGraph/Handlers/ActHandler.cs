@@ -65,6 +65,7 @@ public sealed class ActHandler : IStageHandler
         _db.AgentSteps.Add(step);
 
         var envelope = await _context.BuildAsync(run, Stage, ct);
+        step.PromptTokens = envelope.InputTokens;
         var decision = await _engine.DecideAsync(envelope, ct);
 
         UsageAccounting.Apply(run, decision.Usage);
@@ -72,6 +73,7 @@ public sealed class ActHandler : IStageHandler
 
         step.AssistantText = decision.AssistantText;
         step.ToolCallsJson = JsonSerializer.Serialize(decision.ToolCalls);
+        step.ResponseContentJson = decision.ContentJson;
 
         if (decision.ToolCalls.Count == 0)
         {

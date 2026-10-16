@@ -15,6 +15,10 @@ internal static class UsageAccounting
         run.Budget.TrySpendTokens(usage.InputTokens + usage.OutputTokens);
     }
 
+    /// <summary>
+    /// The model-call trace: the exact envelope (system blocks, tools, messages with sections and cache
+    /// breakpoints), the raw response, and the usage including cache read and creation tokens.
+    /// </summary>
     public static AgentTrace ModelCallTrace(AgentStage stage, PromptEnvelope envelope, ModelUsage usage, string rawResponse, Guid? stepId = null) => new()
     {
         Stage = stage,
@@ -29,9 +33,12 @@ internal static class UsageAccounting
         {
             envelope = new
             {
-                system = envelope.SystemPrompt,
+                system = envelope.System,
                 tools = envelope.Tools.Select(t => t.Name),
                 messages = envelope.Messages,
+                prefixHash = envelope.PrefixHash(),
+                promptTokens = envelope.InputTokens,
+                compaction = envelope.Compaction,
             },
             response = rawResponse,
         }),

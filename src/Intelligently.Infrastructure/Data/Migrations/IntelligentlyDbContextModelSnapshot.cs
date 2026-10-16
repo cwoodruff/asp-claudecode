@@ -98,6 +98,10 @@ namespace Intelligently.Infrastructure.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Embedding")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("EmbeddingJson");
+
                     b.Property<int?>("KnowledgeEntryId")
                         .HasColumnType("int");
 
@@ -110,6 +114,10 @@ namespace Intelligently.Infrastructure.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TaskText")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -131,6 +139,8 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.HasIndex("RunId")
                         .IsUnique();
+
+                    b.HasIndex("TaskType", "CreatedAt");
 
                     b.HasIndex("UserId", "TaskType", "CreatedAt");
 
@@ -155,6 +165,9 @@ namespace Intelligently.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ResponseContentJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Revision")
                         .HasColumnType("int");
@@ -270,6 +283,12 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.Property<int>("PlanStepIndex")
                         .HasColumnType("int");
+
+                    b.Property<int?>("PromptTokens")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResponseContentJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("RunId")
                         .HasColumnType("uniqueidentifier");

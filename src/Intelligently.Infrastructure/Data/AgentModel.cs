@@ -104,8 +104,18 @@ internal static class AgentModel
             e.Property(x => x.UserId).HasMaxLength(450);
             e.Property(x => x.TaskType).HasMaxLength(100);
             e.Property(x => x.Outcome).HasMaxLength(20);
+            e.Property(x => x.Embedding)
+                .HasColumnName("EmbeddingJson")
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<float[]>(v, (JsonSerializerOptions?)null),
+                    new ValueComparer<float[]?>(
+                        (a, c) => (a == null && c == null) || (a != null && c != null && a.SequenceEqual(c)),
+                        v => v == null ? 0 : v.Length,
+                        v => v == null ? null : v.ToArray()));
             e.HasIndex(x => x.RunId).IsUnique();
             e.HasIndex(x => new { x.UserId, x.TaskType, x.CreatedAt });
+            e.HasIndex(x => new { x.TaskType, x.CreatedAt });
         });
 
         b.Entity<AgentApproval>(e =>

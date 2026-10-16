@@ -1,5 +1,6 @@
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Tools;
+using Intelligently.Infrastructure.Agents.Context;
 using Intelligently.Infrastructure.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -49,6 +50,10 @@ public sealed class AgentWebFactory : WebApplicationFactory<Intelligently.Web.Ag
 
             services.RemoveAll<IReasoningEngine>();
             services.AddSingleton(Engine.Object);
+            services.RemoveAll<IPromptTokenCounter>();
+            services.AddSingleton<IPromptTokenCounter, EstimatingTokenCounter>();
+            services.RemoveAll<IEpisodeSummarizer>();
+            services.AddSingleton<IEpisodeSummarizer, ExtractiveSummarizer>();
             services.AddSingleton<IToolHandler>(DestructiveTool);
         });
     }

@@ -1,19 +1,30 @@
-using System.Text.Json;
+using System.Text;
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
+using Intelligently.Infrastructure.Agents.Context;
 using Intelligently.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 
-/// <summary>Learn: write the episodic memory row for the run. Knowledge-base linking arrives in Phase 5.</summary>
+/// <summary>
+/// Learn: write the episodic memory row for the run through the Context Plane store, with a short
+/// summary from the local compaction mode (Haiku at low effort). Knowledge-base linking arrives in Phase 5.
+/// </summary>
 public sealed class LearnHandler : IStageHandler
 {
-    private readonly IntelligentlyDbContext _db;
+    private const int MaxResultCharsInTranscript = 600;
 
-    public LearnHandler(IntelligentlyDbContext db)
+    private readonly IntelligentlyDbContext _db;
+    private readonly IEpisodicMemoryStore _episodes;
+    private readonly IEpisodeSummarizer _summarizer;
+
+    public LearnHandler(IntelligentlyDbContext db, IEpisodicMemoryStore episodes, IEpisodeSummarizer summarizer)
     {
         _db = db;
+        _episodes = episodes;
+        _summarizer = summarizer;
     }
 
     public AgentStage Stage => AgentStage.Learn;
@@ -31,20 +42,44 @@ public sealed class LearnHandler : IStageHandler
             .GroupBy(r => r.Name)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        var lastText = steps.LastOrDefault(s => !string.IsNullOrWhiteSpace(s.AssistantText))?.AssistantText;
-        var summary = lastText ?? plan?.Goal ?? $"Run {run.Id} completed.";
+        var transcript = Transcript(run, plan, steps);
+        var summary = await _summarizer.SummarizeAsync(run, transcript, ct);
+        if (string.IsNullOrWhiteSpace(summary))
+            summary = ExtractiveSummarizer.Summarize(run, transcript);
 
-        _db.AgentEpisodes.Add(new AgentEpisode
-        {
-            RunId = run.Id,
-            UserId = run.UserId,
-            CourseId = run.CourseId,
-            TaskType = run.TaskType,
-            Outcome = AgentRun.StatusCompleted,
-            Summary = summary.Length > 2000 ? summary[..2000] : summary,
-            ToolUsageJson = JsonSerializer.Serialize(toolUsage),
-        });
+        await _episodes.WriteAsync(run, AgentRun.StatusCompleted, summary, toolUsage, ct);
 
         return StageOutcome.To(AgentStage.Completed, "Episode and traces written.");
+    }
+
+    /// <summary>A compact text transcript for the summarizer: goal, then each step with its text and results.</summary>
+    internal static string Transcript(AgentRun run, AgentPlan? plan, IReadOnlyList<AgentStep> steps)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Task: ").AppendLine(TaskText.From(run));
+        if (plan is not null)
+        {
+            sb.Append(ExtractiveSummarizer.GoalPrefix).AppendLine(plan.Goal);
+            foreach (var step in plan.Steps)
+                sb.Append("Plan step ").Append(step.Index).Append(": ").Append(step.Description).Append(" [tool: ").Append(step.Tool ?? "none").AppendLine("]");
+        }
+
+        foreach (var step in steps)
+        {
+            sb.Append("Step ").Append(step.PlanStepIndex).Append(" attempt ").Append(step.Attempt).Append(": ").Append(step.Status);
+            if (!string.IsNullOrWhiteSpace(step.VerifierMessage)) sb.Append(" - ").Append(step.VerifierMessage);
+            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(step.AssistantText))
+                sb.Append(ExtractiveSummarizer.AssistantPrefix).AppendLine(step.AssistantText.Replace('\n', ' '));
+            foreach (var result in StepQueries.Results(step))
+            {
+                var content = result.Content.Replace('\n', ' ');
+                if (content.Length > MaxResultCharsInTranscript) content = content[..MaxResultCharsInTranscript] + "…";
+                sb.Append("Tool ").Append(result.Name).Append(result.IsError ? " (error): " : ": ").AppendLine(content);
+            }
+        }
+
+        sb.Append("Outcome: ").AppendLine(run.Status);
+        return sb.ToString();
     }
 }

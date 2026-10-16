@@ -18,6 +18,9 @@ public sealed record AgentPlan
 
     [JsonIgnore] public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
 
+    /// <summary>The planner response content blocks as JSON, replayed verbatim on later turns.</summary>
+    [JsonIgnore] public string? ResponseContentJson { get; init; }
+
     /// <summary>One sentence restating the goal of the task.</summary>
     [JsonPropertyName("goal")]
     public required string Goal { get; init; }

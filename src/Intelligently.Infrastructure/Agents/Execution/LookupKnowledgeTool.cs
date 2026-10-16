@@ -1,11 +1,10 @@
 using System.Text.Json;
+using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Tools;
-using Intelligently.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace Intelligently.Infrastructure.Agents.Execution;
 
-/// <summary>ReadOnly native tool: keyword lookup over active <c>AIKnowledgeEntry</c> rows.</summary>
+/// <summary>ReadOnly native tool: scored retrieval over active <c>AIKnowledgeEntry</c> rows through the Context Plane retriever.</summary>
 public sealed class LookupKnowledgeTool : IToolHandler
 {
     public const string ToolName = "lookup_knowledge";
@@ -18,21 +17,22 @@ public sealed class LookupKnowledgeTool : IToolHandler
         {
             query = new { type = "string", description = "Keywords or a short phrase to search for in the knowledge base." },
             course_id = new { type = new[] { "integer", "null" }, description = "Restrict results to this course, or null for all courses." },
+            module_id = new { type = new[] { "integer", "null" }, description = "Restrict results to this module within the course, or null for all modules." },
         },
-        required = new[] { "query", "course_id" },
+        required = new[] { "query", "course_id", "module_id" },
         additionalProperties = false,
     });
 
-    private readonly IntelligentlyDbContext _db;
+    private readonly IKnowledgeRetriever _retriever;
 
-    public LookupKnowledgeTool(IntelligentlyDbContext db)
+    public LookupKnowledgeTool(IKnowledgeRetriever retriever)
     {
-        _db = db;
+        _retriever = retriever;
     }
 
     public ToolDescriptor Descriptor { get; } = new(
         ToolName,
-        "Searches the course knowledge base (FAQs, known lab errors, misconceptions, best practices) and returns the best matching entries as JSON.",
+        "Searches the course knowledge base (FAQs, known lab errors, misconceptions, best practices) and returns the best matching entries as JSON with a relevance score.",
         Schema,
         ToolRiskLevel.ReadOnly,
         CourseScopeArgument: "course_id");
@@ -48,20 +48,25 @@ public sealed class LookupKnowledgeTool : IToolHandler
         }
 
         var query = queryElement.GetString()!.Trim();
-        int? courseId = call.Input.TryGetProperty("course_id", out var courseElement) && courseElement.ValueKind == JsonValueKind.Number
-            ? courseElement.GetInt32()
-            : null;
+        var courseId = IntegerArgument(call.Input, "course_id");
+        var moduleId = IntegerArgument(call.Input, "module_id");
 
-        var entries = await _db.AIKnowledgeEntries
-            .AsNoTracking()
-            .Where(e => e.IsActive)
-            .Where(e => courseId == null || e.CourseId == null || e.CourseId == courseId)
-            .Where(e => e.Question.Contains(query) || e.Answer.Contains(query) || (e.Tags != null && e.Tags.Contains(query)))
-            .OrderByDescending(e => e.UpdatedAt)
-            .Take(MaxResults)
-            .Select(e => new { id = e.Id, entryType = e.EntryType, question = e.Question, answer = e.Answer, tags = e.Tags })
-            .ToListAsync(ct);
+        var matches = await _retriever.SearchAsync(query, courseId, moduleId, MaxResults, ct);
+        var entries = matches.Select(m => new
+        {
+            id = m.Entry.Id,
+            entryType = m.Entry.EntryType,
+            question = m.Entry.Question,
+            answer = m.Entry.Answer,
+            tags = m.Entry.Tags,
+            score = m.Score,
+        }).ToList();
 
         return ToolResult.Ok(call, JsonSerializer.Serialize(new { query, count = entries.Count, entries }));
     }
+
+    private static int? IntegerArgument(JsonElement input, string name) =>
+        input.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var value)
+            ? value
+            : null;
 }
