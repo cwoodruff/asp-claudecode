@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Intelligently.Core\Intelligently.Core.csproj" />
     <ProjectReference Include="..\..\src\Intelligently.Infrastructure\Intelligently.Infrastructure.csproj" />
+    <PackageReference Include="Anthropic" Version="12.58.0" />
   </ItemGroup>
 
 </Project>

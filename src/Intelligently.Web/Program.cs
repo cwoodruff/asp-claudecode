@@ -1,5 +1,12 @@
+using Anthropic;
+using Intelligently.Core.Interfaces;
+using Intelligently.Core.Telemetry;
+using Intelligently.Infrastructure.AI;
 using Intelligently.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 // Rate limiting is BUILT INTO ASP.NET Core 10 — these namespaces need no NuGet package:
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
@@ -57,9 +64,71 @@ builder.Services.AddRateLimiter(options =>
 // app.UseAuthorization();
 // app.MapRazorPages();
  
-// Anthropic SDK
-builder.Services.AddSingleton<Anthropic.AnthropicClient>(sp => {
+// ── Anthropic (official SDK) ──────────────────────────────────────────────────────
+// The SDK retries 408/409/429/5xx and connection errors itself, so no Polly wrapper.
+builder.Services.AddSingleton<AnthropicClient>(_ =>
+{
     var key = builder.Configuration["Anthropic:ApiKey"]
               ?? throw new InvalidOperationException("Anthropic:ApiKey not configured");
-    return new Anthropic.AnthropicClient(key);
+    return new AnthropicClient { ApiKey = key };
 });
+builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<AnthropicClient>());
+builder.Services.AddSingleton<IAnthropicService, AnthropicService>();
+
+// ── OpenTelemetry (Evidence Plane) ────────────────────────────────────────────────
+// Console exporter in Development; OTLP (endpoint from Otel:Endpoint) everywhere else.
+var otlpEndpoint = builder.Configuration["Otel:Endpoint"];
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(
+        serviceName: builder.Environment.ApplicationName,
+        serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString()))
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddSource(AgentTelemetry.ActivitySourceName)
+            .AddAspNetCoreInstrumentation();
+
+        if (builder.Environment.IsDevelopment())
+            tracing.AddConsoleExporter();
+        else
+            tracing.AddOtlpExporter(options =>
+            {
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    options.Endpoint = new Uri(otlpEndpoint);
+            });
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics.AddAspNetCoreInstrumentation();
+
+        if (builder.Environment.IsDevelopment())
+            metrics.AddConsoleExporter();
+        else
+            metrics.AddOtlpExporter(options =>
+            {
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    options.Endpoint = new Uri(otlpEndpoint);
+            });
+    });
+
+builder.Services.AddRazorPages();
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseHttpsRedirection();
+
+app.UseRouting();
+app.UseRateLimiter();      // after routing, before endpoints (see note above)
+app.UseAuthorization();
+
+app.MapStaticAssets();
+app.MapRazorPages()
+   .WithStaticAssets();
+
+app.Run();
