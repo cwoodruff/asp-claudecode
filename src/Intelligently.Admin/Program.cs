@@ -1,3 +1,5 @@
+using Intelligently.Core.Agents.Contracts;
+using Intelligently.Infrastructure.Agents.StateGraph;
 using Anthropic;
 using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
@@ -18,9 +20,11 @@ builder.Services.AddSingleton<AnthropicClient>(_ =>
 });
 builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<AnthropicClient>());
 
-// Autonomous agent runtime: Admin uses the approval gate, the policy rules and the run queue.
-// There is no RunWorker here; the Web worker's approval sweep picks up runs decided in Admin.
+// Autonomous agent runtime: Admin uses the approval gate and the policy rules. There is no RunWorker
+// here, so the bounded in-process queue is replaced by one that never blocks or fills; the Web
+// worker's approval sweep picks up runs decided in Admin.
 builder.Services.AddAgentRuntime(builder.Configuration);
+builder.Services.AddSingleton<IRunQueue, NoWorkerRunQueue>();
 
 builder.Services.AddRazorPages();
 
