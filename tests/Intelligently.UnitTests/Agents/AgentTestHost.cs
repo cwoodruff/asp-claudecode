@@ -65,8 +65,10 @@ public sealed class AgentTestHost : IDisposable
         Provider = BuildProvider(configure);
     }
 
-    public async Task<AgentRun> CreateRunAsync(string taskType = "LabErrorDiagnosis", string taskSpec = """{"question":"CS0246 on build"}""", string userId = "learner-1", int courseId = 7)
+    /// <summary>Creates a run; the default is a valid <c>LabErrorDiagnosis</c> spec for course 7 (see <see cref="LabSpecs"/>).</summary>
+    public async Task<AgentRun> CreateRunAsync(string taskType = "LabErrorDiagnosis", string? taskSpec = null, string userId = "learner-1", int courseId = 7)
     {
+        taskSpec ??= LabSpecs.Default;
         using var scope = Provider.CreateScope();
         var runs = scope.ServiceProvider.GetRequiredService<AgentRunService>();
         return await runs.CreateAsync(userId, courseId, taskType, taskSpec);

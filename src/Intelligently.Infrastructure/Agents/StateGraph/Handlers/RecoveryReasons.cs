@@ -14,4 +14,7 @@ public static class RecoveryReasons
 
     /// <summary>A hard budget (tokens, tool calls, wall clock) is spent before the next model or tool work; Recover escalates.</summary>
     public const string BudgetExhausted = "BudgetExhausted";
+
+    /// <summary>An instructor denied a change to course-provided material; the agent may not work around it, so Recover escalates.</summary>
+    public const string MaterialDenied = "MaterialDenied";
 }

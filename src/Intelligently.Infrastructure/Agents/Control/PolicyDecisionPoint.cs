@@ -11,6 +11,8 @@ namespace Intelligently.Infrastructure.Agents.Control;
 /// (or <see cref="PolicyRule.Defaults"/>) and are evaluated in a fixed order:
 /// <list type="number">
 ///   <item>Identity: no principal, no tool; role requirements; a course-scoped call must target a course the principal is enrolled in.</item>
+///   <item>Course material: a call that changes protected course material (the task contract decides what that is, for example a
+///   course-provided file of a lab) needs a human unless the exact call was already approved.</item>
 ///   <item>Risk gate: the first matching risk rule decides. ReadOnly → Allow, Mutating → Allow inside the run's course scope,
 ///   Destructive and External → RequireApproval. An explicit, recorded approval for the exact call satisfies the gate.</item>
 ///   <item>Rate limit: per-run and per-user permits for tool dispatch; exceeded → Deny.</item>
@@ -23,6 +25,7 @@ public sealed class PolicyDecisionPoint : IPolicyDecisionPoint
     private readonly IToolRateLimiter _rateLimiter;
     private readonly IIdempotencyBarrier _barrier;
     private readonly IApprovalGate _approvals;
+    private readonly ITaskTypeRegistry _tasks;
     private readonly ILogger<PolicyDecisionPoint> _logger;
 
     public PolicyDecisionPoint(
@@ -30,18 +33,21 @@ public sealed class PolicyDecisionPoint : IPolicyDecisionPoint
         IToolRateLimiter rateLimiter,
         IIdempotencyBarrier barrier,
         IApprovalGate approvals,
+        ITaskTypeRegistry tasks,
         ILogger<PolicyDecisionPoint> logger)
     {
         _rules = options.Value.Policy.EffectiveRules;
         _rateLimiter = rateLimiter;
         _barrier = barrier;
         _approvals = approvals;
+        _tasks = tasks;
         _logger = logger;
     }
 
     public async Task<PolicyDecision> EvaluateAsync(PolicyRequest request, CancellationToken ct = default)
     {
         var decision = EvaluateIdentity(request)
+                       ?? await EvaluateCourseMaterialAsync(request, ct)
                        ?? await EvaluateRiskAsync(request, ct);
         if (decision.Verdict != PolicyVerdict.Allow)
             return Log(request, decision);
@@ -78,7 +84,38 @@ public sealed class PolicyDecisionPoint : IPolicyDecisionPoint
         return null;
     }
 
-    // 2. Risk gate --------------------------------------------------------------------------------
+    // 2. Course material --------------------------------------------------------------------------
+
+    /// <summary>
+    /// A call that changes protected course material (as the run's task contract defines it) is decided by the
+    /// first matching course-material rule: Deny, or RequireApproval unless the exact call was already approved,
+    /// in which case the risk gate decides as usual. Null when the call leaves course material intact.
+    /// </summary>
+    private async Task<PolicyDecision?> EvaluateCourseMaterialAsync(PolicyRequest request, CancellationToken ct)
+    {
+        var rule = Matching(PolicyRuleKind.CourseMaterial, request.Descriptor).FirstOrDefault();
+        if (rule is null) return null;
+
+        var change = _tasks.Find(request.Run.TaskType)?.DescribeProtectedChange(request.Run, request.Call);
+        if (change is null) return null;
+
+        var reason = $"Rule '{rule.Name}': {change}.";
+        switch (rule.Effect)
+        {
+            case PolicyEffect.Allow:
+            case PolicyEffect.AllowInScope:
+                return null;
+            case PolicyEffect.Deny:
+                return PolicyDecision.Deny(reason, PolicyRuleKind.CourseMaterial, rule.Name);
+            default:
+                var approval = await _approvals.FindApprovedAsync(request.Run.Id, request.Call.Name, _barrier.ComputeKey(request.Call), ct);
+                return approval is null
+                    ? PolicyDecision.RequireApproval(reason, PolicyRuleKind.CourseMaterial, rule.Name)
+                    : null;
+        }
+    }
+
+    // 3. Risk gate --------------------------------------------------------------------------------
 
     private async Task<PolicyDecision> EvaluateRiskAsync(PolicyRequest request, CancellationToken ct)
     {
@@ -132,7 +169,7 @@ public sealed class PolicyDecisionPoint : IPolicyDecisionPoint
         return request.Descriptor.CourseIdOf(request.Call) == request.Run.CourseId;
     }
 
-    // 3. Rate limit -------------------------------------------------------------------------------
+    // 4. Rate limit -------------------------------------------------------------------------------
 
     private async Task<PolicyDecision> EvaluateRateLimitAsync(PolicyRequest request, PolicyDecision allowed, CancellationToken ct)
     {
@@ -145,7 +182,7 @@ public sealed class PolicyDecisionPoint : IPolicyDecisionPoint
             PolicyRuleKind.RateLimit, outcome.Rule);
     }
 
-    // 4. Idempotency barrier ----------------------------------------------------------------------
+    // 5. Idempotency barrier ----------------------------------------------------------------------
 
     private async Task<PolicyDecision> EvaluateIdempotencyAsync(PolicyRequest request, PolicyDecision allowed, CancellationToken ct)
     {

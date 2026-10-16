@@ -79,7 +79,7 @@ public class StablePrefixEndpointTests : IClassFixture<AgentWebFactory>
 
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            courseId = 11, taskType = "LabErrorDiagnosis", taskSpec = new { question = "My build fails with CS0246." },
+            courseId = 11, taskType = "LabErrorDiagnosis", taskSpec = TestSpecs.LabSpec(courseId: 11),
         });
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();

@@ -10,7 +10,10 @@
     "totalInputTokens": 6900,
     "totalOutputTokens": 390,
     "totalCostUsd": 0.033080,
-    "budget": { "replansLeft": 3, "retriesLeft": 1, "toolCallsLeft": 39, "tokensLeft": 292710 }
+    "budget": { "replansLeft": 3, "retriesLeft": 1, "toolCallsLeft": 39, "tokensLeft": 292710 },
+    "expectedOutputPresent": false,
+    "hasExplanation": true,
+    "hasFixDiff": false
   },
   "stages": [ "Interpret", "Plan", "Act", "Observe", "Verify", "Recover", "Act", "Observe", "Verify", "Learn", "Completed" ],
   "steps": [

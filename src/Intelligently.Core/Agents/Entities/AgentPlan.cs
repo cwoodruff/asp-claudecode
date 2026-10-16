@@ -48,4 +48,8 @@ public sealed record PlanStep
     /// <summary>How Verify decides the step succeeded.</summary>
     [JsonPropertyName("success_criteria")]
     public required string SuccessCriteria { get; init; }
+
+    /// <summary>The plan-template phase this step fulfils (for example <c>reproduce</c> or <c>explain</c>), or null when the task has no template.</summary>
+    [JsonPropertyName("phase")]
+    public string? Phase { get; init; }
 }

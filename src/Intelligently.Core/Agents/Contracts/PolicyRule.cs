@@ -6,9 +6,11 @@ namespace Intelligently.Core.Agents.Contracts;
 public enum PolicyRuleKind
 {
     Identity = 0,
-    Risk = 1,
-    RateLimit = 2,
-    Idempotency = 3,
+    /// <summary>A call that changes protected course material (a course-provided file of the task spec) needs a human.</summary>
+    CourseMaterial = 1,
+    Risk = 2,
+    RateLimit = 3,
+    Idempotency = 4,
 }
 
 /// <summary>What a matching <see cref="PolicyRuleKind.Risk"/> rule does.</summary>
@@ -31,8 +33,8 @@ public enum RateLimitScope
 /// <summary>
 /// One data-driven policy rule, bound from <c>Agents:Policy:Rules</c>. A rule applies to a tool call
 /// when the tool name matches <see cref="Tool"/> and the tool's risk level is in <see cref="RiskLevels"/>
-/// (or that list is empty). Rules are evaluated identity → risk → rate limit → idempotency, and within a
-/// kind in configuration order.
+/// (or that list is empty). Rules are evaluated identity → course material → risk → rate limit → idempotency,
+/// and within a kind in configuration order.
 /// </summary>
 public sealed class PolicyRule
 {
@@ -53,7 +55,7 @@ public sealed class PolicyRule
     /// <summary>When true, a course-scoped tool call must target a course the principal is enrolled in.</summary>
     public bool RequireCourseScope { get; set; } = true;
 
-    // Risk rules
+    // Risk and course-material rules
     public PolicyEffect Effect { get; set; } = PolicyEffect.RequireApproval;
 
     // Rate limit rules
@@ -79,13 +81,15 @@ public sealed class PolicyRule
 
     /// <summary>
     /// The rule set from plan section 1.4, used when <c>Agents:Policy:Rules</c> is empty:
-    /// a principal is required, ReadOnly is allowed, Mutating is allowed inside the run's course scope,
-    /// Destructive and External always need approval, 20 tool calls per run and 60 per user per minute,
-    /// and every non-ReadOnly call goes through the idempotency barrier.
+    /// a principal is required, a call that changes course-provided material needs approval, ReadOnly is
+    /// allowed, Mutating is allowed inside the run's course scope, Destructive and External always need
+    /// approval, 20 tool calls per run and 60 per user per minute, and every non-ReadOnly call goes through
+    /// the idempotency barrier.
     /// </summary>
     public static IReadOnlyList<PolicyRule> Defaults { get; } =
     [
         new() { Name = "enrolment", Kind = PolicyRuleKind.Identity, RequireCourseScope = true },
+        new() { Name = "course-material-approval", Kind = PolicyRuleKind.CourseMaterial, Effect = PolicyEffect.RequireApproval },
         new() { Name = "read-only", Kind = PolicyRuleKind.Risk, RiskLevels = [ToolRiskLevel.ReadOnly], Effect = PolicyEffect.Allow },
         new() { Name = "mutating-in-scope", Kind = PolicyRuleKind.Risk, RiskLevels = [ToolRiskLevel.Mutating], Effect = PolicyEffect.AllowInScope },
         new() { Name = "destructive-approval", Kind = PolicyRuleKind.Risk, RiskLevels = [ToolRiskLevel.Destructive], Effect = PolicyEffect.RequireApproval },

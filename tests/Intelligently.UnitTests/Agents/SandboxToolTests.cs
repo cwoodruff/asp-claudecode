@@ -131,14 +131,22 @@ public class SandboxToolTests
         var run = await host.CreateRunAsync();
         var (final, stages) = await host.RunToEndAsync(run.Id);
 
-        // The timed-out result is not is_error (the tool ran), so deterministic verification passes it on
-        // the tool's own terms; the ground-truth gate on expected output arrives with the pilot task.
+        // The timed-out result is not is_error (the tool ran), but the lab contract's deterministic assertions
+        // (plan section 2.4, contract 2) fail the step; Recover retries it and the second attempt completes.
         final.Status.Should().Be(AgentRun.StatusCompleted);
-        stages.Should().Equal(AgentStage.Interpret, AgentStage.Plan, AgentStage.Act, AgentStage.Observe, AgentStage.Verify, AgentStage.Learn, AgentStage.Completed);
-        var step = await host.QueryAsync(db => db.AgentSteps.SingleAsync(s => s.RunId == run.Id));
-        var results = JsonSerializer.Deserialize<List<ToolResult>>(step.ToolResultsJson!)!;
+        final.Budget.RetriesLeft.Should().Be(1);
+        stages.Should().Equal(
+            AgentStage.Interpret, AgentStage.Plan,
+            AgentStage.Act, AgentStage.Observe, AgentStage.Verify, AgentStage.Recover,
+            AgentStage.Act, AgentStage.Observe, AgentStage.Verify, AgentStage.Learn, AgentStage.Completed);
+        var steps = await host.QueryAsync(db => db.AgentSteps.Where(s => s.RunId == run.Id).OrderBy(s => s.Attempt).ToListAsync());
+        steps.Select(s => s.Status).Should().Equal(AgentStep.StatusFailed, AgentStep.StatusPassed);
+        steps[0].VerifierMessage.Should().Contain("timed out");
+        var results = JsonSerializer.Deserialize<List<ToolResult>>(steps[1].ToolResultsJson!)!;
         results.Should().ContainSingle().Which.Name.Should().Be(RunLabCodeTool.ToolName);
-        JsonSerializer.Deserialize<RunLabCodeOutput>(results[0].Content)!.TimedOut.Should().BeTrue();
-        sandbox.Requests.Should().ContainSingle();
+        var output = JsonSerializer.Deserialize<RunLabCodeOutput>(results[0].Content)!;
+        output.Succeeded.Should().BeTrue();
+        output.MatchesExpectedOutput.Should().BeTrue();
+        sandbox.Requests.Should().HaveCount(2);
     }
 }

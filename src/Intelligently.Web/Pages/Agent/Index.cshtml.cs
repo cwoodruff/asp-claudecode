@@ -23,7 +23,24 @@ public sealed class IndexModel : PageModel
 
     [BindProperty] public int CourseId { get; set; } = 1;
     [BindProperty] public string TaskType { get; set; } = "LabErrorDiagnosis";
-    [BindProperty] public string TaskSpec { get; set; } = """{ "question": "My build fails with CS0246. What does it mean?" }""";
+    [BindProperty] public string TaskSpec { get; set; } = DefaultLabSpec;
+
+    /// <summary>A LabErrorDiagnosis spec the demo form starts with: one learner file, the compiler error, no expected output.</summary>
+    public const string DefaultLabSpec = """
+        {
+          "course_id": 1,
+          "module_id": 3,
+          "language": "csharp",
+          "learner_files": [
+            { "path": "Program.cs", "content": "using System;\nusing Newtonsoft.Json;\n\nConsole.WriteLine(JsonConvert.SerializeObject(new { ok = true }));\n" }
+          ],
+          "course_files": [],
+          "entrypoint": "Program.cs",
+          "error_text": "error CS0246: The type or namespace name 'Newtonsoft' could not be found",
+          "expected_output": null,
+          "learner_level": "Beginner"
+        }
+        """;
     public string? Error { get; private set; }
 
     /// <summary>The caller's enrolled courses, shown so the demo picks a course the run may act in.</summary>

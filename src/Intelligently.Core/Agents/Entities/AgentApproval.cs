@@ -23,6 +23,12 @@ public sealed class AgentApproval
     /// <summary>Why the policy decision point asked for a human.</summary>
     public string Reason { get; set; } = string.Empty;
 
+    /// <summary>The <c>PolicyRuleKind</c> of the rule that asked for a human (<c>Risk</c>, <c>CourseMaterial</c>), or null.</summary>
+    public string? RuleKind { get; set; }
+
+    /// <summary>Name of the policy rule that asked for a human, or null.</summary>
+    public string? Rule { get; set; }
+
     /// <summary>Pending | Approved | Denied.</summary>
     public string Status { get; set; } = StatusPending;
 

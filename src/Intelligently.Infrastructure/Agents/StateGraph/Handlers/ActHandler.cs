@@ -138,7 +138,7 @@ public sealed class ActHandler : IStageHandler
         step.Status = AgentStep.StatusAwaitingApproval;
         step.ToolResultsJson = JsonSerializer.Serialize(results);
 
-        var approval = await _approvals.RequestAsync(run, step, call, reason, ct);
+        var approval = await _approvals.RequestAsync(run, step, call, reason, ct, dispatch.Decision);
         return StageOutcome.To(AgentStage.AwaitingApproval, $"Tool '{call.Name}' requires approval ({approval.Id}): {reason}");
     }
 }

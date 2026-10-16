@@ -28,6 +28,9 @@ internal static class AgentModel
             e.Property(x => x.ClaimedUntil).IsConcurrencyToken();
             e.Property(x => x.TraceId).HasMaxLength(32);
             e.Property(x => x.RootSpanId).HasMaxLength(16);
+            // Learner-facing output of a completed typed run: the explanation and the fix as a unified diff.
+            e.Property(x => x.FinalExplanation);
+            e.Property(x => x.FixDiff);
             e.Ignore(x => x.IsActive);
             e.Ignore(x => x.IsWaitingForApproval);
             e.HasIndex(x => new { x.Status, x.Stage });
@@ -135,6 +138,8 @@ internal static class AgentModel
             e.Property(x => x.ArgsHash).HasMaxLength(64);
             e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.DecidedBy).HasMaxLength(450);
+            e.Property(x => x.RuleKind).HasMaxLength(30);
+            e.Property(x => x.Rule).HasMaxLength(100);
             e.Ignore(x => x.IsPending);
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.RunId, x.CreatedAt });

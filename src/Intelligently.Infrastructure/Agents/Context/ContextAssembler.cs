@@ -38,6 +38,7 @@ public sealed class ContextAssembler : IContextAssembler
     private readonly IKnowledgeRetriever _knowledge;
     private readonly IEpisodicMemoryStore _episodes;
     private readonly TokenBudgeter _budgeter;
+    private readonly ITaskTypeRegistry _tasks;
     private readonly AgentsOptions _options;
 
     public ContextAssembler(
@@ -46,6 +47,7 @@ public sealed class ContextAssembler : IContextAssembler
         IKnowledgeRetriever knowledge,
         IEpisodicMemoryStore episodes,
         TokenBudgeter budgeter,
+        ITaskTypeRegistry tasks,
         IOptions<AgentsOptions> options)
     {
         _db = db;
@@ -53,6 +55,7 @@ public sealed class ContextAssembler : IContextAssembler
         _knowledge = knowledge;
         _episodes = episodes;
         _budgeter = budgeter;
+        _tasks = tasks;
         _options = options.Value;
     }
 
@@ -265,6 +268,8 @@ public sealed class ContextAssembler : IContextAssembler
                 foreach (var tool in _tools.Descriptors)
                     sb.Append("- ").Append(tool.Name).Append(": ").AppendLine(tool.Description);
                 sb.AppendLine("Produce a short, ordered plan. Each step names exactly one tool from the list, or null for a reasoning-only step, and states how success will be verified.");
+                if (_tasks.Find(run.TaskType)?.PlanTemplate is { } template)
+                    AppendTemplate(sb, template);
                 if (run.PlanRevision > 0)
                     sb.Append("This is plan revision ").Append(run.PlanRevision).Append(". The previous attempt failed: ").Append(run.StatusReason).AppendLine(" Change the approach rather than repeating a plan that already failed.");
                 break;
@@ -278,6 +283,8 @@ public sealed class ContextAssembler : IContextAssembler
                 var current = plan.Steps[run.CurrentStepIndex];
                 sb.Append("Now execute step ").Append(current.Index).Append(" of plan revision ").Append(run.PlanRevision).Append(": ").AppendLine(current.Description);
                 sb.Append("Success criteria: ").AppendLine(current.SuccessCriteria);
+                if (current.Phase is not null)
+                    sb.Append("Template phase: ").AppendLine(current.Phase);
                 sb.AppendLine(current.Tool is not null
                     ? $"Call the tool '{current.Tool}' with arguments that match its schema."
                     : "This step needs no tool; answer in plain text.");
@@ -288,5 +295,25 @@ public sealed class ContextAssembler : IContextAssembler
                 break;
         }
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>The task's plan template as structured guidance: phases in order, the tool each uses, the success criteria Verify applies, and the constraints.</summary>
+    private static void AppendTemplate(StringBuilder sb, PlanTemplate template)
+    {
+        sb.Append("Plan template for this task type: ").AppendLine(template.Summary);
+        sb.AppendLine("Cover these phases in this order and set each step's \"phase\" to the phase name:");
+        for (var i = 0; i < template.Steps.Count; i++)
+        {
+            var step = template.Steps[i];
+            sb.Append(i + 1).Append(". ").Append(step.Phase).Append(": ").Append(step.Description)
+              .Append(" Tool: ").Append(step.Tool ?? "none (reasoning only)")
+              .Append(". Success: ").AppendLine(step.SuccessCriteria);
+        }
+        if (template.Constraints.Count > 0)
+        {
+            sb.AppendLine("Constraints:");
+            foreach (var constraint in template.Constraints)
+                sb.Append("- ").AppendLine(constraint);
+        }
     }
 }

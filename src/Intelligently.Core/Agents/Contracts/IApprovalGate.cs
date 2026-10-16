@@ -14,7 +14,7 @@ public interface IApprovalGate
     /// Writes the pending <see cref="AgentApproval"/> and its <c>AIEscalation</c> for a call the
     /// policy decision point sent back as RequireApproval. Nothing is saved; the runner commits with the stage.
     /// </summary>
-    Task<AgentApproval> RequestAsync(AgentRun run, AgentStep step, ToolCall call, string reason, CancellationToken ct = default);
+    Task<AgentApproval> RequestAsync(AgentRun run, AgentStep step, ToolCall call, string reason, CancellationToken ct = default, PolicyDecision? decision = null);
 
     /// <summary>An approved decision for this exact call (same run, tool and argument hash), or null.</summary>
     Task<AgentApproval?> FindApprovedAsync(Guid runId, string toolName, string argsHash, CancellationToken ct = default);

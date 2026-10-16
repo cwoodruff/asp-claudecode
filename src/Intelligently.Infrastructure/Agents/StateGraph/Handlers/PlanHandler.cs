@@ -10,11 +10,17 @@ using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 
-/// <summary>Plan: ask the Intelligence Plane for a schema-valid plan and persist it as a new revision.</summary>
+/// <summary>
+/// Plan: ask the Intelligence Plane for a schema-valid plan and persist it as a new revision. When
+/// candidate search is enabled for the task type, N plans are generated and judged and the best one is
+/// kept (every candidate is evidence); the task contract's template constraints are then applied.
+/// </summary>
 public sealed class PlanHandler : IStageHandler
 {
     private readonly IContextAssembler _context;
     private readonly IReasoningEngine _engine;
+    private readonly ICandidateSearch _search;
+    private readonly ITaskTypeRegistry _tasks;
     private readonly IToolRegistry _tools;
     private readonly IEvidenceSink _evidence;
     private readonly ICostAccountant _costs;
@@ -24,6 +30,8 @@ public sealed class PlanHandler : IStageHandler
     public PlanHandler(
         IContextAssembler context,
         IReasoningEngine engine,
+        ICandidateSearch search,
+        ITaskTypeRegistry tasks,
         IToolRegistry tools,
         IEvidenceSink evidence,
         ICostAccountant costs,
@@ -32,6 +40,8 @@ public sealed class PlanHandler : IStageHandler
     {
         _context = context;
         _engine = engine;
+        _search = search;
+        _tasks = tasks;
         _tools = tools;
         _evidence = evidence;
         _costs = costs;
@@ -50,21 +60,36 @@ public sealed class PlanHandler : IStageHandler
         var envelope = await _context.BuildAsync(run, Stage, ct);
 
         PlanResult result;
-        using (_evidence.StartModelCall(run, Stage, _model, "high"))
+        var searched = string.Empty;
+        if (_search.IsEnabledFor(run.TaskType))
         {
-            result = await _engine.PlanAsync(envelope, ct);
-            await UsageAccounting.RecordAsync(_costs, _evidence, run, Stage, envelope, result.Usage, result.RawResponse, result.ContentJson, result.Metadata, null, ct);
+            var search = await _search.SearchAsync(run, envelope, ct);
+            result = search.Best;
+            var kept = search.Candidates.FirstOrDefault(c => c.Selected);
+            searched = kept is null
+                ? $" Candidate search: none of {search.Candidates.Count} candidates was valid."
+                : $" Candidate search kept candidate {kept.Index} of {search.Candidates.Count} (score {kept.Score:0.00}).";
+        }
+        else
+        {
+            using (_evidence.StartModelCall(run, Stage, _model, "high"))
+            {
+                result = await _engine.PlanAsync(envelope, ct);
+                await UsageAccounting.RecordAsync(_costs, _evidence, run, Stage, envelope, result.Usage, result.RawResponse, result.ContentJson, result.Metadata, null, ct);
+            }
         }
 
         if (run.Budget.IsExhausted)
             return Exhausted(run, "after the planner call");
 
         if (!result.Succeeded)
-            return Recover(run, result.FailureReason ?? "Planner produced no plan.");
+            return Recover(run, (result.FailureReason ?? "Planner produced no plan.") + searched);
 
         var plan = result.Plan!;
         if (Validate(plan) is { } problem)
-            return Recover(run, problem);
+            return Recover(run, problem + searched);
+        if (_tasks.Find(run.TaskType)?.ValidatePlan(run, plan) is { } templateProblem)
+            return Recover(run, templateProblem + searched);
 
         var canonical = JsonSerializer.Serialize(plan);
         var stored = plan with
@@ -80,7 +105,7 @@ public sealed class PlanHandler : IStageHandler
         run.CurrentStepIndex = 0;
         run.RecoveryReason = null;
 
-        return StageOutcome.To(AgentStage.Act, $"Plan revision {stored.Revision} produced with {stored.Steps.Count} step(s).");
+        return StageOutcome.To(AgentStage.Act, $"Plan revision {stored.Revision} produced with {stored.Steps.Count} step(s).{searched}");
     }
 
     private static StageOutcome Recover(AgentRun run, string reason)

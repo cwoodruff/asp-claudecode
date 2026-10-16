@@ -15,6 +15,7 @@ namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 ///   <item>Hard budget exhausted (tokens, tool calls, wall clock) → escalate.</item>
 ///   <item>Oscillation: the current plan's hash equals one of the previous three revisions, or the
 ///   current step failed twice with the same verifier message → escalate.</item>
+///   <item>An instructor denied a change to course-provided material → escalate (the agent may not work around the denial).</item>
 ///   <item>Step failed with retries left → Act (retry the same step, RetriesLeft − 1).</item>
 ///   <item>Otherwise (plan failed, policy denied, retries spent) with replans left → Plan (PlanRevision + 1, ReplansLeft − 1).</item>
 ///   <item>Nothing left → escalate.</item>
@@ -46,6 +47,9 @@ public sealed class RecoverHandler : IStageHandler
 
         if (await DetectOscillationAsync(run, ct) is { } oscillation)
             return await EscalateAsync(run, $"Oscillation detected: {oscillation}. Last failure: {cause}", ct);
+
+        if (run.RecoveryReason == RecoveryReasons.MaterialDenied)
+            return await EscalateAsync(run, $"An instructor denied the change to course-provided material; the lab cannot be fixed within the learner's files. Last failure: {cause}", ct);
 
         if (run.RecoveryReason == RecoveryReasons.StepFailed && budget.TrySpendRetry())
             return StageOutcome.To(AgentStage.Act, $"Retrying step {run.CurrentStepIndex} ({budget.RetriesLeft} retries left). Cause: {cause}");

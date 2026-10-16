@@ -44,6 +44,32 @@ public class TraceReplayEvalTests
         fixtures.Select(f => f.Name).Should().OnlyHaveUniqueItems();
     }
 
+    [Fact]
+    public void The_fixture_set_covers_the_lab_error_diagnosis_pilot()
+    {
+        // Phase 6: a graded lab decided by the ground-truth gate, an ungraded one decided by the model judgement,
+        // and a fix in course-provided material that an instructor denied, so the run escalated.
+        var fixtures = TraceFixture.FixturePaths(FixturesDirectory).Select(TraceFixture.Load).ToList();
+
+        var graded = fixtures.Should().ContainSingle(f => f.Name == "lab-compile-error-ground-truth").Subject;
+        graded.Run.ExpectedOutputPresent.Should().BeTrue();
+        graded.Traces.Should().NotContain(t => t.Kind == "Judgement");
+        var judged = fixtures.Should().ContainSingle(f => f.Name == "lab-runtime-error-judged").Subject;
+        judged.Run.ExpectedOutputPresent.Should().BeFalse();
+        judged.Traces.Should().ContainSingle(t => t.Kind == "Judgement").Which.Score.Should().BeInRange(0.7, 1);
+        var escalated = fixtures.Should().ContainSingle(f => f.Name == "lab-course-file-fix-escalated").Subject;
+        escalated.Expect.Outcome.Should().Be("escalated");
+        escalated.Traces.Should().Contain(t => t.Kind == "Approval" && t.Decision == "Denied");
+
+        foreach (var fixture in new[] { graded, judged, escalated })
+        {
+            var score = RubricEvaluator.Evaluate(fixture);
+            Report(score);
+            score.Criteria.Select(c => c.Criterion).Should().Contain(c => c.StartsWith("lab."), "the lab criteria apply to the pilot fixtures");
+            score.PassRate.Should().Be(1.0, $"{fixture.Name}: {string.Join("; ", score.Failures.Select(f => $"{f.Criterion} ({f.Detail})"))}");
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Fixtures))]
     public void Each_fixture_meets_the_pass_rate_threshold(string fileName)

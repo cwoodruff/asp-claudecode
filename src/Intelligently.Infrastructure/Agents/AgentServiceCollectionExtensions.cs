@@ -12,6 +12,7 @@ using Intelligently.Infrastructure.Agents.Intelligence;
 using Intelligently.Infrastructure.Agents.Learn;
 using Intelligently.Infrastructure.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents.StateGraph.Handlers;
+using Intelligently.Infrastructure.Agents.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -44,8 +45,13 @@ public static class AgentServiceCollectionExtensions
         services.AddScoped<IStageHandler, RecoverHandler>();
         services.AddScoped<IStageHandler, LearnHandler>();
 
-        // Intelligence Plane
+        // Task contracts: one per typed task; the registry is what the stages and the Control Plane consult
+        services.AddSingleton<ITaskContract, LabErrorDiagnosisContract>();
+        services.AddSingleton<ITaskTypeRegistry, TaskTypeRegistry>();
+
+        // Intelligence Plane (candidate search records evidence, so it lives on the stage's unit of work)
         services.AddSingleton<IReasoningEngine, AnthropicReasoningEngine>();
+        services.AddScoped<ICandidateSearch, CandidateSearch>();
 
         // Context Plane: retrieval and episodic memory on the scoped DbContext; counting, budgeting,
         // compaction and cache health shared across scopes

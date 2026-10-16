@@ -53,6 +53,14 @@ namespace Intelligently.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Rule")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("RuleKind")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<Guid>("RunId")
                         .HasColumnType("uniqueidentifier");
 
@@ -217,6 +225,12 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.Property<int>("CurrentStepIndex")
                         .HasColumnType("int");
+
+                    b.Property<string>("FinalExplanation")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FixDiff")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("PlanRevision")
                         .HasColumnType("int");

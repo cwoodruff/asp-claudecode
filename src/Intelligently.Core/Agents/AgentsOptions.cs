@@ -42,6 +42,25 @@ public sealed class AgentsOptions
     /// <summary>Price table for the cost accountant, bound from <c>Agents:Pricing</c>.</summary>
     public PricingOptions Pricing { get; set; } = new();
 
+    /// <summary>Test-time compute for planning, bound from <c>Agents:CandidateSearch</c>.</summary>
+    public CandidateSearchOptions CandidateSearch { get; set; } = new();
+
+    /// <summary>
+    /// Candidate search (plan section 1.1): N plans generated in parallel, each scored by the judge, the best
+    /// kept. Off for every task type unless listed, so the extra cost is always a deliberate choice.
+    /// </summary>
+    public sealed class CandidateSearchOptions
+    {
+        /// <summary>Plans generated per Plan stage when the search is on; 1 or less means a single plan.</summary>
+        public int Candidates { get; set; } = 3;
+
+        /// <summary>Task types the search is enabled for (case-insensitive). Empty: off everywhere.</summary>
+        public List<string> TaskTypes { get; set; } = [];
+
+        public bool IsEnabledFor(string? taskType) =>
+            Candidates > 1 && !string.IsNullOrWhiteSpace(taskType) && TaskTypes.Contains(taskType, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// USD per million tokens per model (plan section 1.5). The defaults are the first-party API rates of
     /// the two models the runtime uses; cache creation is 1.25× the input rate, cache reads 0.1× (0.05× on

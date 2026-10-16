@@ -50,6 +50,12 @@ public sealed class AgentRun
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 
+    /// <summary>The learner-facing explanation written when the run completed (task types with a contract), or null.</summary>
+    public string? FinalExplanation { get; set; }
+
+    /// <summary>The proposed fix as a unified diff of the learner's files, or null when nothing changed.</summary>
+    public string? FixDiff { get; set; }
+
     /// <summary>W3C trace id (32 hex chars) of the run's root span; every stage span of the run, in any process, shares it.</summary>
     public string? TraceId { get; set; }
 

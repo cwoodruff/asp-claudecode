@@ -67,7 +67,7 @@ public sealed class ToolDispatcher : IToolDispatcher
             if (decision.Verdict == PolicyVerdict.RequireApproval)
             {
                 _logger.LogInformation("Run {RunId}: tool {Tool} requires approval ({Reason})", run.Id, call.Name, decision.Reason);
-                return new DispatchResult([], RequiresApproval: true, decision.Reason, call);
+                return new DispatchResult([], RequiresApproval: true, decision.Reason, call, decision);
             }
 
             decisions.Add((call, handler, decision));

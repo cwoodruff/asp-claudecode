@@ -9,7 +9,9 @@ namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 /// <summary>
 /// AwaitingApproval: executed once the approval gate has recorded a decision and set the run back
 /// to Running. Approved resumes the same Act step; denied marks the parked step failed and sends the
-/// run to Recover with <see cref="RecoveryReasons.PolicyDenied"/>, which must replan without that tool.
+/// run to Recover with <see cref="RecoveryReasons.PolicyDenied"/>, which must replan without that tool,
+/// or with <see cref="RecoveryReasons.MaterialDenied"/> when the denied call changed course-provided
+/// material, which Recover escalates.
 /// </summary>
 public sealed class AwaitingApprovalHandler : IStageHandler
 {
@@ -43,6 +45,12 @@ public sealed class AwaitingApprovalHandler : IStageHandler
                     step.Status = AgentStep.StatusFailed;
                     step.VerifierMessage = $"Approval denied by {approval.DecidedBy}{note}.";
                     step.CompletedAt = DateTime.UtcNow;
+                }
+                if (string.Equals(approval.RuleKind, nameof(PolicyRuleKind.CourseMaterial), StringComparison.Ordinal))
+                {
+                    run.RecoveryReason = RecoveryReasons.MaterialDenied;
+                    return StageOutcome.To(AgentStage.Recover,
+                        $"Approval {approval.Id} for tool '{approval.ToolName}' denied by {approval.DecidedBy}{note}. The fix changed course-provided material; escalate.");
                 }
                 run.RecoveryReason = RecoveryReasons.PolicyDenied;
                 return StageOutcome.To(AgentStage.Recover,

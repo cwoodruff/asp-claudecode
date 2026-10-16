@@ -53,7 +53,7 @@ public class RunLabCodeEndpointTests : IClassFixture<AgentWebFactory>
             .ReturnsAsync(new PlanResult(new AgentPlan
             {
                 Goal = "Reproduce the learner's build.",
-                Steps = [new PlanStep { Index = 0, Description = "Run the lab.", Tool = RunLabCodeTool.ToolName, SuccessCriteria = "The program prints hi." }],
+                Steps = [new PlanStep { Index = 0, Phase = "rerun", Description = "Run the lab.", Tool = RunLabCodeTool.ToolName, SuccessCriteria = "The program prints hi." }],
             }, Usage, "{}"));
         _factory.Engine.Setup(e => e.DecideAsync(It.IsAny<PromptEnvelope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DecisionResult(
@@ -68,7 +68,7 @@ public class RunLabCodeEndpointTests : IClassFixture<AgentWebFactory>
         var client = _factory.CreateClient().AsLearner("learner-lab", 7);
         var before = _factory.Sandbox.Requests.Count;
 
-        var created = await client.PostAsJsonAsync("/agent/runs", new { courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { error = "none" } });
+        var created = await client.PostAsJsonAsync("/agent/runs", new { courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = TestSpecs.LabSpec(courseId: 7, expectedOutput: "hi") });
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 
@@ -84,6 +84,7 @@ public class RunLabCodeEndpointTests : IClassFixture<AgentWebFactory>
         {
             var step = await db.AgentSteps.SingleAsync(s => s.RunId == id);
             step.Status.Should().Be(AgentStep.StatusPassed);
+            step.VerifierMessage.Should().Contain("Ground truth", "a rerun step with an expected output passes through the ground-truth gate");
             var results = JsonSerializer.Deserialize<List<ToolResult>>(step.ToolResultsJson!)!;
             var output = JsonSerializer.Deserialize<RunLabCodeOutput>(results.Single().Content)!;
             output.Succeeded.Should().BeTrue();
