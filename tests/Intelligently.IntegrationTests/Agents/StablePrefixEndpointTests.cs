@@ -75,11 +75,11 @@ public class StablePrefixEndpointTests : IClassFixture<AgentWebFactory>
             });
             return Task.CompletedTask;
         });
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-prefix", 11);
 
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            userId = "learner-prefix", courseId = 11, taskType = "LabErrorDiagnosis", taskSpec = new { question = "My build fails with CS0246." },
+            courseId = 11, taskType = "LabErrorDiagnosis", taskSpec = new { question = "My build fails with CS0246." },
         });
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();

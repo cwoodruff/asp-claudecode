@@ -1,6 +1,7 @@
 using Anthropic;
 using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,10 @@ builder.Services.AddSingleton<IAnthropicClient>(sp => sp.GetRequiredService<Anth
 // There is no RunWorker here; the Web worker's approval sweep picks up runs decided in Admin.
 builder.Services.AddAgentRuntime(builder.Configuration);
 
+// Authentication & authorization: Identity (cookie) over the same DbContext. /approvals, /runs and
+// /runs/{id} require the "Instructor" policy; decisions are recorded under the signed-in user's name.
+builder.Services.AddIntelligentlyIdentity();
+
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
@@ -38,6 +43,7 @@ app.UseHttpsRedirection();
 
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();

@@ -4,8 +4,18 @@
     ViewData["Title"] = "Agent";
 }
 <h1>Start an agent run</h1>
+<p id="agent-caller">
+    Running as <strong>@User.Identity?.Name</strong>
+    @if (Model.EnrolledCourses.Count > 0)
+    {
+        <text>· enrolled in course(s) @string.Join(", ", Model.EnrolledCourses)</text>
+    }
+    else
+    {
+        <text>· not enrolled in any course</text>
+    }
+</p>
 <form method="post" hx-post="/agent" hx-target="#run-status" hx-swap="innerHTML">
-    <label>User id <input name="UserId" value="@Model.UserId" required /></label>
     <label>Course id <input name="CourseId" type="number" value="@Model.CourseId" required /></label>
     <label>Task type <input name="TaskType" value="@Model.TaskType" required /></label>
     <label>Task spec (JSON)

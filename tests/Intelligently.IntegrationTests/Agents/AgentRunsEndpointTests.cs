@@ -69,11 +69,10 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
             });
             return Task.CompletedTask;
         });
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-1", 7);
 
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            userId = "learner-1",
             courseId = 7,
             taskType = "LabErrorDiagnosis",
             taskSpec = new { question = "My build fails with CS0246." },
@@ -106,10 +105,10 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
     public async Task Get_without_HX_Request_returns_the_full_page_with_the_partial()
     {
         StubHappyPath();
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-2", 7);
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            userId = "learner-2", courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { question = "q" },
+            courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { question = "q" },
         });
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 
@@ -123,7 +122,7 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
     [Fact]
     public async Task Get_unknown_run_returns_404()
     {
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-404", 7);
         var response = await client.GetAsync($"/agent/runs/{Guid.NewGuid()}");
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -131,10 +130,10 @@ public class AgentRunsEndpointTests : IClassFixture<AgentWebFactory>
     [Fact]
     public async Task Post_without_task_type_returns_400()
     {
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-3", 7);
         var response = await client.PostAsJsonAsync("/agent/runs", new
         {
-            userId = "learner-3", courseId = 7, taskType = "", taskSpec = new { question = "q" },
+            courseId = 7, taskType = "", taskSpec = new { question = "q" },
         });
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }

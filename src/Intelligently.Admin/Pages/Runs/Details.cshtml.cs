@@ -1,5 +1,7 @@
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Intelligently.Admin.Pages.Runs;
 
 /// <summary>/runs/{id}: read-only trace viewer showing the run, its steps and its evidence rows in order.</summary>
+[Authorize(Policy = AgentAuthorization.InstructorPolicy)]
 public sealed class DetailsModel : PageModel
 {
     private readonly IntelligentlyDbContext _db;

@@ -1,11 +1,14 @@
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
 namespace Intelligently.Admin.Pages.Runs;
 
 /// <summary>/runs: the most recent agent runs, as an entry point to the trace viewer.</summary>
+[Authorize(Policy = AgentAuthorization.InstructorPolicy)]
 public sealed class IndexModel : PageModel
 {
     private const int PageSize = 50;

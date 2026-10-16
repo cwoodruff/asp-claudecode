@@ -4,6 +4,7 @@ using Intelligently.Core.Telemetry;
 using Intelligently.Infrastructure.AI;
 using Intelligently.Infrastructure.Agents;
 using Intelligently.Infrastructure.Data;
+using Intelligently.Infrastructure.Identity;
 using Intelligently.Web.Agents;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
@@ -18,6 +19,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Database
 builder.Services.AddDbContext<IntelligentlyDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// ── Authentication & authorization ────────────────────────────────────────────────
+// ASP.NET Core Identity (cookie) over the same DbContext. Every agent route requires an
+// authenticated caller; the RunPrincipal a run acts under comes from the caller's claims only.
+builder.Services.AddIntelligentlyIdentity();
  
 // ── Rate Limiting (built-in ASP.NET Core 10, zero NuGet packages) ─────────────────
 // Uses PartitionedRateLimiter so each authenticated user gets their OWN independent
@@ -133,6 +139,7 @@ app.UseHttpsRedirection();
 
 app.UseRouting();
 app.UseRateLimiter();      // after routing, before endpoints (see note above)
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
