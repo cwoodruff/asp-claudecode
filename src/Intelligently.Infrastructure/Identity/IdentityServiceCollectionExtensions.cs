@@ -25,12 +25,7 @@ public static class IdentityServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddIntelligentlyIdentity(this IServiceCollection services)
     {
-        services.AddIdentity<IdentityUser, IdentityRole>(options =>
-            {
-                options.Password.RequiredLength = 8;
-                options.Lockout.MaxFailedAccessAttempts = 5;
-                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
-            })
+        services.AddIdentity<IdentityUser, IdentityRole>(ConfigureIdentityOptions)
             .AddEntityFrameworkStores<IntelligentlyDbContext>()
             .AddDefaultTokenProviders();
 
@@ -56,6 +51,28 @@ public static class IdentityServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// <see cref="UserManager{TUser}"/> and <see cref="RoleManager{TRole}"/> over <see cref="IntelligentlyDbContext"/>
+    /// with the same <see cref="IdentityOptions"/> as <see cref="AddIntelligentlyIdentity"/>, but without cookies,
+    /// sign-in, token providers or authorization. For processes that manage accounts and serve no requests
+    /// (the account tool in <c>src/Intelligently.Tools</c>).
+    /// </summary>
+    public static IServiceCollection AddIntelligentlyAccountManagement(this IServiceCollection services)
+    {
+        services.AddIdentityCore<IdentityUser>(ConfigureIdentityOptions)
+            .AddRoles<IdentityRole>()
+            .AddEntityFrameworkStores<IntelligentlyDbContext>();
+        return services;
+    }
+
+    /// <summary>Password and lockout rules shared by the hosts and the account tool.</summary>
+    private static void ConfigureIdentityOptions(IdentityOptions options)
+    {
+        options.Password.RequiredLength = 8;
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
     }
 
     private static Task RedirectOrStatus(RedirectContext<CookieAuthenticationOptions> context, int statusCode)

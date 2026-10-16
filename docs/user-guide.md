@@ -78,9 +78,10 @@ and decides but never steps a run, so a Web instance must be running for anythin
 
 ### 1.4 Accounts
 
-There is no registration page and no seeding code. Accounts, roles, and enrolments are provisioned out
-of band through ASP.NET Core Identity's `UserManager` and `RoleManager`, for example from a one-off
-script or a small console project that references Infrastructure.
+There is no registration page and no default account: a fresh database has no users at all. Accounts,
+the `Instructor` role, and course enrolments are created with the account tool in `src/Intelligently.Tools`,
+a console app that goes through the same ASP.NET Core Identity registration as the hosts
+(`AddIntelligentlyIdentity`), so password rules, hashing, and user-name normalisation are identical.
 
 What each kind of user needs:
 
@@ -89,11 +90,56 @@ What each kind of user needs:
 | Learner | none required | One `intelligently:course` claim per enrolled course, value = course id |
 | Instructor | `Instructor` | `intelligently:course` claims as well, if they will create runs |
 
-The enrolment claim is added with `UserManager.AddClaimAsync(user, new Claim("intelligently:course", "7"))`.
-Non-numeric values are ignored. Claims and roles are copied into the cookie at sign-in, and the security
-stamp validator invalidates the cookie after a password reset, deletion, or role or claim change.
+**Create the first instructor** after applying the migrations (section 1.3):
 
-Password rules: minimum length 8. Lockout after 5 failed attempts for 15 minutes.
+```bash
+dotnet run --project src/Intelligently.Tools -- create-user --username instructor1 --email instructor1@example.edu --instructor --course 1
+```
+
+The tool asks for the password twice with the input masked. It never accepts a password as a
+command-line argument (`--password` and similar options are rejected) and never prints one. For scripted
+use, put the password in the `INTELLIGENTLY_NEW_PASSWORD` environment variable instead; the tool reads it
+when set and does not prompt. With stdin redirected and the variable unset, it fails rather than reading
+a password in plain text.
+
+Commands (each takes `--username`; `--course` may be repeated):
+
+| Command | Effect |
+|---|---|
+| `create-user --username X --email Y [--instructor] [--course N]...` | Creates the user with a password, adds the `Instructor` role (creating the role if it does not exist yet) and one `intelligently:course` claim per course. All of it is one transaction: a rejected password or any other error leaves nothing behind. |
+| `grant-course --username X --course N...` | Adds the enrolment claims the user does not already have. |
+| `revoke-course --username X --course N...` | Removes every enrolment claim for those courses. |
+| `add-instructor --username X` | Adds the `Instructor` role, creating the role if needed. |
+| `remove-instructor --username X` | Removes the user from the `Instructor` role. The role itself stays. |
+| `reset-password --username X` | Sets a new password (prompted or from `INTELLIGENTLY_NEW_PASSWORD`), clears any lockout, and changes the security stamp. |
+| `list-users` | Prints each user's name, email, roles, enrolled courses, and lockout end. No password hashes or stamps. |
+| `help` | Prints the usage. |
+
+Exit codes: 0 on success (including "already enrolled" and similar no-ops), 1 when a command fails, 2 for
+an invalid command line.
+
+The tool reads `ConnectionStrings:DefaultConnection` the way the hosts do: `appsettings.json`,
+`appsettings.{Environment}.json`, user secrets (id `intelligently-local`, Development only), then
+environment variables (`ConnectionStrings__DefaultConnection`). The environment comes from
+`DOTNET_ENVIRONMENT` or `ASPNETCORE_ENVIRONMENT`. `dotnet run` uses the tool's launch profile, which sets
+`Development`, so by default it targets the same LocalDB database as the hosts. For another server,
+set the environment variable:
+
+```bash
+ConnectionStrings__DefaultConnection="Server=...;Database=Intelligently;..." dotnet run --project src/Intelligently.Tools -- list-users
+```
+
+Course ids are positive whole numbers. Nothing checks that a course exists; there is no course entity yet.
+
+Claims and roles are copied into the cookie at sign-in. A user who is already signed in picks up a role or
+enrolment change when they next sign in, or when the security stamp validator next refreshes the cookie
+(every 30 minutes, the Identity default). A password reset changes the security stamp, so existing
+sign-ins end at that refresh.
+
+Password rules: at least 8 characters, with at least one uppercase letter, one lowercase letter, one digit,
+and one non-alphanumeric character. The hosts set only the length and keep ASP.NET Core Identity's other
+defaults, and the tool uses the same options. Lockout after 5 failed attempts for 15 minutes;
+`reset-password` clears it.
 
 Sign-in routes are the same in both hosts: `/Account/Login`, `/Account/Logout` (POST), and
 `/Account/AccessDenied`. Browser requests that fail authorization are redirected; JSON and htmx requests
@@ -493,6 +539,12 @@ the existing ones; every file in the folder is loaded. No export tool exists yet
 
 | Symptom | Cause and action |
 |---|---|
+| Nobody can sign in on a new database | There is no default account. Create one with `dotnet run --project src/Intelligently.Tools -- create-user ...` (section 1.4). |
+| Sign-in fails for a known user | Check the name with `list-users`. A user with a lockout end has failed 5 times; `reset-password --username X` sets a new password and clears the lockout. |
+| Admin returns Access Denied | The account is not in the `Instructor` role. Run `add-instructor --username X`, then sign out and in again. |
+| Demo form says "You are not enrolled in course N", or `POST /agent/runs` returns 403 | The user has no `intelligently:course` claim for that course. Run `grant-course --username X --course N`, then sign out and in again. |
+| Account tool says `ConnectionStrings:DefaultConnection is not set` | The environment is not Development (no LocalDB default) and no connection string is configured. Set `ConnectionStrings__DefaultConnection` or run through `dotnet run`, which uses the Development profile. |
+| Account tool fails with "No password" in a script | Stdin is redirected, so the tool will not prompt. Set `INTELLIGENTLY_NEW_PASSWORD` for that command. |
 | Run fails with "Anthropic:ApiKey not configured" | Set the key as a user secret or environment variable. A run that failed this way stays Running and is re-enqueued on every start until the key exists. |
 | Approved run does not resume | Admin never steps runs. A Web host must be running with `ApprovalSweepSeconds` above 0; allow that many seconds. |
 | Run stuck after a crash | The startup sweep resumes it, or another worker takes it over once the lease expires (600 s by default). |
