@@ -1,0 +1,42 @@
+@using Intelligently.Core.Entities.AI
+@model AIEscalation
+@{
+    var open = Model.Status is "New" or "InProgress";
+    var question = Model.LearnerQuestion.Length > 400 ? Model.LearnerQuestion[..400] + "…" : Model.LearnerQuestion;
+}
+<tr id="escalation-@Model.Id" class="escalation escalation-@Model.Status.ToLowerInvariant()" data-escalation-status="@Model.Status" data-add-to-knowledge-base="@Model.AddToKnowledgeBase.ToString().ToLowerInvariant()">
+    <td>@Model.CreatedAt.ToString("u")</td>
+    <td>
+        @if (Model.AgentRunId is { } runId)
+        {
+            <a href="/runs/@runId"><code>@runId</code></a>
+        }
+        <br /><small>@Model.UserId · course @Model.CourseId</small>
+    </td>
+    <td>@Model.Priority</td>
+    <td>@Model.EscalationReason</td>
+    <td><pre class="question">@question</pre></td>
+    <td>
+        @if (open)
+        {
+            <form method="post" asp-page-handler="Resolve" hx-post="/escalations?handler=Resolve" hx-target="closest tr" hx-swap="outerHTML" class="resolution">
+                <input type="hidden" name="id" value="@Model.Id" />
+                <textarea name="response" rows="3" placeholder="Your answer to the learner" aria-label="Instructor response" required></textarea>
+                <label><input type="checkbox" name="addToKnowledgeBase" value="true" /> Add to knowledge base</label>
+                <button type="submit" class="resolve">Resolve</button>
+            </form>
+        }
+        else
+        {
+            <p class="resolved"><strong>@Model.Status</strong> by @Model.InstructorUserId at @(Model.ResolvedAt?.ToString("u"))</p>
+            @if (!string.IsNullOrWhiteSpace(Model.InstructorResponse))
+            {
+                <p><em>@Model.InstructorResponse</em></p>
+            }
+            @if (Model.AddToKnowledgeBase)
+            {
+                <p class="knowledge"><small>Added to the knowledge base.</small></p>
+            }
+        }
+    </td>
+</tr>

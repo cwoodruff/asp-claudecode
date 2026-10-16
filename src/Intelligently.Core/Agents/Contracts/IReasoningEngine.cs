@@ -6,8 +6,9 @@ namespace Intelligently.Core.Agents.Contracts;
 /// <summary>
 /// Result of <see cref="IReasoningEngine.PlanAsync"/>. <see cref="ContentJson"/> is the JSON array of the
 /// response content blocks exactly as the provider returned them, so the transcript can replay them.
+/// <see cref="Metadata"/> carries the reasoning summary, stop reason, effort and latency for the evidence row.
 /// </summary>
-public sealed record PlanResult(AgentPlan? Plan, ModelUsage Usage, string RawResponse, string? FailureReason = null, string? ContentJson = null)
+public sealed record PlanResult(AgentPlan? Plan, ModelUsage Usage, string RawResponse, string? FailureReason = null, string? ContentJson = null, ModelCallMetadata? Metadata = null)
 {
     public bool Succeeded => Plan is not null;
 }
@@ -23,10 +24,11 @@ public sealed record DecisionResult(
     string StopReason,
     ModelUsage Usage,
     string RawResponse,
-    string? ContentJson = null);
+    string? ContentJson = null,
+    ModelCallMetadata? Metadata = null);
 
 /// <summary>Result of <see cref="IReasoningEngine.JudgeAsync"/>.</summary>
-public sealed record JudgementResult(bool Passed, double Score, string Rationale, ModelUsage Usage, string RawResponse);
+public sealed record JudgementResult(bool Passed, double Score, string Rationale, ModelUsage Usage, string RawResponse, ModelCallMetadata? Metadata = null);
 
 /// <summary>
 /// Intelligence Plane: turns intent into structured plans and candidate tool calls.

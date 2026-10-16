@@ -225,6 +225,10 @@ namespace Intelligently.Infrastructure.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<string>("RootSpanId")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
                     b.Property<string>("Stage")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -256,6 +260,10 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.Property<int>("TotalOutputTokens")
                         .HasColumnType("int");
+
+                    b.Property<string>("TraceId")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("UserId")
                         .IsRequired()
@@ -345,8 +353,16 @@ namespace Intelligently.Infrastructure.Data.Migrations
                     b.Property<int>("CacheReadInputTokens")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("CostUsd")
+                        .HasPrecision(12, 6)
+                        .HasColumnType("decimal(12,6)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("Effort")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<int>("InputTokens")
                         .HasColumnType("int");
@@ -355,6 +371,9 @@ namespace Intelligently.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
+
+                    b.Property<double?>("LatencyMs")
+                        .HasColumnType("float");
 
                     b.Property<string>("Model")
                         .HasMaxLength(100)
@@ -365,6 +384,9 @@ namespace Intelligently.Infrastructure.Data.Migrations
 
                     b.Property<string>("Payload")
                         .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ReasoningSummary")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("RunId")
@@ -378,9 +400,15 @@ namespace Intelligently.Infrastructure.Data.Migrations
                     b.Property<Guid?>("StepId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("StopReason")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("RunId", "CreatedAt");
+
+                    b.HasIndex("StepId", "Kind");
 
                     b.ToTable("AgentTraces", (string)null);
                 });

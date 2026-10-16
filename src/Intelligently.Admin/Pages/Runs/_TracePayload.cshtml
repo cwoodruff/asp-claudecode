@@ -1,0 +1,6 @@
+@using Intelligently.Core.Agents.Entities
+@model AgentTrace
+<div class="trace-payload" id="trace-payload-@Model.Id" data-trace-id="@Model.Id" data-trace-kind="@Model.Kind">
+    <p class="text-muted"><small>#@Model.Id · @Model.Kind · @Model.Stage · @Model.CreatedAt.ToString("u")</small></p>
+    <pre class="raw-json">@Intelligently.Admin.Pages.Runs.DetailsModel.PrettyJson(Model.Payload)</pre>
+</div>

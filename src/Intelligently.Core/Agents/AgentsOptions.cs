@@ -39,6 +39,43 @@ public sealed class AgentsOptions
     /// <summary>Sandbox settings, bound from <c>Agents:Sandbox</c>.</summary>
     public SandboxOptions Sandbox { get; set; } = new();
 
+    /// <summary>Price table for the cost accountant, bound from <c>Agents:Pricing</c>.</summary>
+    public PricingOptions Pricing { get; set; } = new();
+
+    /// <summary>
+    /// USD per million tokens per model (plan section 1.5). The defaults are the first-party API rates of
+    /// the two models the runtime uses; cache creation is 1.25× the input rate, cache reads 0.1× (0.05× on
+    /// Opus 5.5, whose cache reads are priced at $0.20). A model without a row costs nothing and is logged.
+    /// </summary>
+    public sealed class PricingOptions
+    {
+        public Dictionary<string, ModelPricing> Models { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["claude-opus-5-5"] = new() { InputPerMillion = 4.00m, OutputPerMillion = 20.00m, CacheReadPerMillion = 0.20m, CacheCreationPerMillion = 5.00m },
+            ["claude-haiku-5-5"] = new() { InputPerMillion = 0.10m, OutputPerMillion = 0.50m, CacheReadPerMillion = 0.01m, CacheCreationPerMillion = 0.125m },
+        };
+
+        /// <summary>The price row for a model id, matched exactly or by prefix (a dated snapshot shares its base model's rates).</summary>
+        public ModelPricing? For(string? model)
+        {
+            if (string.IsNullOrWhiteSpace(model)) return null;
+            if (Models.TryGetValue(model, out var exact)) return exact;
+            return Models
+                .Where(p => model.StartsWith(p.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(p => p.Key.Length)
+                .Select(p => p.Value)
+                .FirstOrDefault();
+        }
+    }
+
+    public sealed class ModelPricing
+    {
+        public decimal InputPerMillion { get; set; }
+        public decimal OutputPerMillion { get; set; }
+        public decimal CacheReadPerMillion { get; set; }
+        public decimal CacheCreationPerMillion { get; set; }
+    }
+
     public sealed class McpOptions
     {
         /// <summary>Servers to connect to at startup; a server that fails to connect is logged and skipped.</summary>

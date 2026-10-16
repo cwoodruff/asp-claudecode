@@ -19,5 +19,6 @@ public sealed record DispatchResult(
 /// </summary>
 public interface IToolDispatcher
 {
-    Task<DispatchResult> DispatchAsync(AgentRun run, IReadOnlyList<ToolCall> calls, CancellationToken ct = default);
+    /// <summary>Dispatches the calls of one turn. <paramref name="stepId"/> is the step the calls belong to, recorded on their evidence rows.</summary>
+    Task<DispatchResult> DispatchAsync(AgentRun run, IReadOnlyList<ToolCall> calls, CancellationToken ct = default, Guid? stepId = null);
 }

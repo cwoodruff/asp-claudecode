@@ -1,5 +1,6 @@
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Entities.AI;
+using Intelligently.Core.Exceptions;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,31 @@ namespace Intelligently.Infrastructure.Data;
 public class IntelligentlyDbContext : IdentityDbContext
 {
     public IntelligentlyDbContext(DbContextOptions<IntelligentlyDbContext> options) : base(options) { }
+
+    /// <summary>
+    /// <see cref="AgentTrace"/> is append-only (plan section 1.5): a unit of work that has marked a trace
+    /// row Modified or Deleted is rejected before anything is written. Corrections are new rows.
+    /// </summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RejectAppendOnlyViolations();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        RejectAppendOnlyViolations();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RejectAppendOnlyViolations()
+    {
+        foreach (var entry in ChangeTracker.Entries<AgentTrace>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new AppendOnlyViolationException(nameof(AgentTrace), entry.State == EntityState.Modified ? "update" : "delete");
+        }
+    }
 
     public DbSet<AIConversation>    AIConversations    => Set<AIConversation>();
     public DbSet<AIMessage>         AIMessages         => Set<AIMessage>();

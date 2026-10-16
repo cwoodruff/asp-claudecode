@@ -1,0 +1,33 @@
+@page "/escalations"
+@model Intelligently.Admin.Pages.Escalations.IndexModel
+@{
+    ViewData["Title"] = "Escalations";
+}
+<h1>Agent escalations</h1>
+<p class="text-muted">Runs that could not recover, or tool calls that needed a person. Resolve one with your answer; tick <em>add to knowledge base</em> when the answer is reusable and it becomes a knowledge entry linked from the run's episode, so later runs find it.</p>
+
+@if (Model.Escalations.Count == 0)
+{
+    <p id="no-escalations">No escalations from agent runs.</p>
+}
+else
+{
+    <table class="escalations" id="escalations">
+        <thead>
+            <tr>
+                <th>Raised</th>
+                <th>Run</th>
+                <th>Priority</th>
+                <th>Reason</th>
+                <th>Learner question</th>
+                <th>Resolution</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var escalation in Model.Escalations)
+            {
+                <partial name="_EscalationRow" model="escalation" />
+            }
+        </tbody>
+    </table>
+}

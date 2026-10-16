@@ -1,8 +1,9 @@
-using System.Text.Json;
+using System.Diagnostics;
 using Intelligently.Core.Agents;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.Tools;
+using Intelligently.Infrastructure.Agents.Evidence;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -45,9 +46,9 @@ public sealed class ToolDispatcher : IToolDispatcher
         _logger = logger;
     }
 
-    private sealed record Outcome(ToolResult Result, bool Replayed, bool Coalesced = false);
+    private sealed record Outcome(ToolResult Result, bool Replayed, bool Coalesced = false, double? LatencyMs = null);
 
-    public async Task<DispatchResult> DispatchAsync(AgentRun run, IReadOnlyList<ToolCall> calls, CancellationToken ct = default)
+    public async Task<DispatchResult> DispatchAsync(AgentRun run, IReadOnlyList<ToolCall> calls, CancellationToken ct = default, Guid? stepId = null)
     {
         var principal = run.Principal;
         var context = ToolContext.For(run);
@@ -99,37 +100,31 @@ public sealed class ToolDispatcher : IToolDispatcher
         }
 
         // 3. Record, truncate and trace in call order (barrier and evidence share the scoped DbContext).
+        //    Each call gets its own span under the stage span, carrying the tool, risk level, PDP decision
+        //    and latency; a sandbox run also leaves a SandboxLog row with its exit code and output.
         var results = new List<ToolResult>(calls.Count);
         for (var i = 0; i < decisions.Count; i++)
         {
             var (call, handler, decision) = decisions[i];
-            var (result, replayed, coalesced) = outcomes[i];
+            var (result, replayed, coalesced, latencyMs) = outcomes[i];
 
             if (!replayed && !result.IsError && decision.IdempotencyKey is { } key)
                 await _barrier.RecordAsync(run.Id, call, key, result, ct);
 
+            var untruncated = result;
             result = Truncate(result);
             results.Add(result);
 
-            await _evidence.RecordAsync(run, new AgentTrace
-            {
-                Stage = run.Stage,
-                Kind = AgentTrace.KindToolCall,
-                Payload = JsonSerializer.Serialize(new
-                {
-                    call = new { call.Id, call.Name, input = call.Input },
-                    decision = decision.Verdict.ToString(),
-                    decisionReason = decision.Reason,
-                    rule = decision.Rule,
-                    ruleKind = decision.RuleKind?.ToString(),
-                    riskLevel = handler?.Descriptor.RiskLevel.ToString(),
-                    replayed,
-                    coalesced,
-                    exclusive = handler?.Descriptor.Exclusive ?? false,
-                    parallel = decisions.Count > 1,
-                    result = new { result.IsError, result.ErrorKind, result.Content },
-                }),
-            }, ct);
+            using var span = _evidence.StartToolCall(run, call, handler?.Descriptor);
+            span?.SetTag("agent.pdp.decision", decision.Verdict.ToString());
+            if (decision.Rule is not null) span?.SetTag("agent.pdp.rule", decision.Rule);
+            span?.SetTag("agent.tool.replayed", replayed);
+            span?.SetTag("agent.tool.is_error", result.IsError);
+            if (latencyMs is { } latency) span?.SetStartTime(DateTime.UtcNow.AddMilliseconds(-latency));
+
+            await _evidence.RecordAsync(run, TraceWriter.ToolCall(run.Stage, call, result, decision, handler?.Descriptor, replayed, coalesced, decisions.Count > 1, latencyMs, stepId), ct);
+            if (!replayed && TraceWriter.SandboxLog(run.Stage, call, untruncated, stepId) is { } sandboxLog)
+                await _evidence.RecordAsync(run, sandboxLog, ct);
         }
 
         return new DispatchResult(results, RequiresApproval: false);
@@ -176,6 +171,7 @@ public sealed class ToolDispatcher : IToolDispatcher
 
     private async Task<Outcome> ExecuteAsync(IToolHandler handler, ToolCall call, ToolContext context, CancellationToken ct)
     {
+        var stopwatch = Stopwatch.StartNew();
         ToolResult result;
         try
         {
@@ -186,12 +182,13 @@ public sealed class ToolDispatcher : IToolDispatcher
             _logger.LogWarning(ex, "Tool {Tool} failed", call.Name);
             result = ToolResult.Error(call, $"Tool '{call.Name}' threw {ex.GetType().Name}: {ex.Message}");
         }
+        stopwatch.Stop();
 
         // Normalize to the call that was made, whatever the handler put in the result.
         if (result.ToolCallId != call.Id || result.Name != call.Name)
             result = result with { ToolCallId = call.Id, Name = call.Name };
 
-        return new Outcome(_validator.Validate(handler.Descriptor, call, result), Replayed: false);
+        return new Outcome(_validator.Validate(handler.Descriptor, call, result), Replayed: false, LatencyMs: stopwatch.Elapsed.TotalMilliseconds);
     }
 
     private ToolResult Truncate(ToolResult result)

@@ -169,6 +169,47 @@ public class AnthropicReasoningEngineTests
     }
 
     [Fact]
+    public async Task Thinking_is_requested_summarized_and_the_summary_stop_reason_effort_and_latency_are_returned_as_metadata()
+    {
+        var (engine, handler) = Build(Response("""
+            [
+              {"type":"thinking","thinking":"The learner hit CS0246, so a knowledge lookup comes first.","signature":"sig_01"},
+              {"type":"text","text":"Let me look that up."},
+              {"type":"tool_use","id":"toolu_01","name":"lookup_knowledge","input":{"query":"CS0246"}}
+            ]
+            """, stopReason: "tool_use"));
+
+        var result = await engine.DecideAsync(Envelope());
+
+        using var body = JsonDocument.Parse(handler.LastRequestBody!);
+        var thinking = body.RootElement.GetProperty("thinking");
+        thinking.GetProperty("type").GetString().Should().Be("adaptive");
+        thinking.GetProperty("display").GetString().Should().Be("summarized", "the Evidence Plane stores the provider's reasoning summary");
+
+        var metadata = result.Metadata.Should().NotBeNull().And.Subject.As<ModelCallMetadata>();
+        metadata.ReasoningSummary.Should().Be("The learner hit CS0246, so a knowledge lookup comes first.");
+        metadata.StopReason.Should().Be("tool_use");
+        metadata.Effort.Should().Be("medium");
+        metadata.LatencyMs.Should().BeGreaterThanOrEqualTo(0);
+        result.AssistantText.Should().Be("Let me look that up.", "thinking blocks are not assistant text");
+        result.ContentJson.Should().Contain("\"type\":\"thinking\"", "the thinking block is replayed verbatim on later turns");
+    }
+
+    [Fact]
+    public async Task Plan_metadata_reports_high_effort_and_no_summary_when_thinking_is_omitted()
+    {
+        var planJson = """{"goal":"Explain CS0246","steps":[{"index":0,"description":"Look it up","tool":"lookup_knowledge","success_criteria":"entry found"}]}""";
+        var (engine, _) = Build(Response($$"""[{"type":"thinking","thinking":"","signature":"sig"},{"type":"text","text":{{JsonSerializer.Serialize(planJson)}}}]"""));
+
+        var result = await engine.PlanAsync(Envelope());
+
+        result.Succeeded.Should().BeTrue();
+        result.Metadata!.Effort.Should().Be("high");
+        result.Metadata.StopReason.Should().Be("end_turn");
+        result.Metadata.ReasoningSummary.Should().BeNull("an empty thinking block (display omitted) leaves no summary");
+    }
+
+    [Fact]
     public async Task Refusal_stop_reason_throws_AIRefusalException()
     {
         var (engine, _) = Build("""

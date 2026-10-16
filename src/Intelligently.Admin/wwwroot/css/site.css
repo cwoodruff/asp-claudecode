@@ -29,3 +29,10 @@ body {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
   text-align: start;
 }
+/* Agent trace viewer (/runs/{id}) and escalations (/escalations) */
+.step-evidence td { background: #fafafa; }
+.step-evidence pre, .trace-payload pre, .model-call-details pre { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow: auto; background: #f4f4f4; padding: .5rem; }
+.raw-target:empty { display: none; }
+button.raw { font-size: .85rem; margin-top: .25rem; }
+.escalations textarea { width: 100%; min-width: 16rem; }
+.escalations pre.question { white-space: pre-wrap; max-width: 28rem; }

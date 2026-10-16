@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Models.Beta.Messages;
@@ -18,7 +20,9 @@ namespace Intelligently.Infrastructure.Agents.Intelligence;
 /// sent on every call so the cached prefix is the same for every stage, with <c>tool_choice: none</c> where
 /// the call must answer in text. When the envelope asks for server-side compaction the beta header and
 /// context-management edit are added, and a <c>compaction</c> stop continues the turn with the full
-/// response content appended, so compaction blocks survive.
+/// response content appended, so compaction blocks survive. Thinking is requested with
+/// <c>display: summarized</c> so the Evidence Plane can store the provider's reasoning summary as text,
+/// together with the stop reason, effort and latency of every call.
 /// </summary>
 public sealed class AnthropicReasoningEngine : IReasoningEngine
 {
@@ -50,31 +54,33 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
             Format = new BetaJsonOutputFormat { Schema = PlanSchema },
         };
 
-        var (message, usage, contentJson) = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceNone()), ct);
+        var call = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceNone()), "high", ct);
+        var message = call.Message;
 
         var text = TextOf(message);
         var raw = message.ToString() ?? text;
 
         if (message.StopReason == MaxTokensStopReason)
-            return new PlanResult(null, usage, raw, "Planner output was truncated at max_tokens.", contentJson);
+            return new PlanResult(null, call.Usage, raw, "Planner output was truncated at max_tokens.", call.ContentJson, call.Metadata);
 
         try
         {
             var plan = JsonSerializer.Deserialize<AgentPlan>(text, AgentJsonSchema.SerializerOptions);
             return plan is null
-                ? new PlanResult(null, usage, raw, "Planner returned an empty plan.", contentJson)
-                : new PlanResult(plan, usage, raw, ContentJson: contentJson);
+                ? new PlanResult(null, call.Usage, raw, "Planner returned an empty plan.", call.ContentJson, call.Metadata)
+                : new PlanResult(plan, call.Usage, raw, ContentJson: call.ContentJson, Metadata: call.Metadata);
         }
         catch (JsonException ex)
         {
-            return new PlanResult(null, usage, raw, $"Planner output did not match the plan schema: {ex.Message}", contentJson);
+            return new PlanResult(null, call.Usage, raw, $"Planner output did not match the plan schema: {ex.Message}", call.ContentJson, call.Metadata);
         }
     }
 
     public async Task<DecisionResult> DecideAsync(PromptEnvelope envelope, CancellationToken ct = default)
     {
         var outputConfig = new BetaOutputConfig { Effort = Effort.Medium };
-        var (message, usage, contentJson) = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceAuto()), ct);
+        var call = await CallAsync(envelope, messages => BuildParams(envelope, messages, outputConfig, new BetaToolChoiceAuto()), "medium", ct);
+        var message = call.Message;
 
         var calls = new List<ToolCall>();
         var text = new List<string>();
@@ -90,9 +96,10 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
             calls,
             text.Count == 0 ? null : string.Concat(text),
             message.StopReason?.Raw() ?? "unknown",
-            usage,
+            call.Usage,
             message.ToString() ?? string.Empty,
-            contentJson);
+            call.ContentJson,
+            call.Metadata);
     }
 
     public async Task<JudgementResult> JudgeAsync(PromptEnvelope envelope, string rubric, CancellationToken ct = default)
@@ -111,28 +118,35 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
             Effort = Effort.High,
             Format = new BetaJsonOutputFormat { Schema = JudgementSchema },
         };
-        var (message, usage, _) = await CallAsync(judged, msgs => BuildParams(judged, msgs, outputConfig, new BetaToolChoiceNone()), ct);
+        var call = await CallAsync(judged, msgs => BuildParams(judged, msgs, outputConfig, new BetaToolChoiceNone()), "high", ct);
+        var message = call.Message;
 
         var text = TextOf(message);
         var judgement = JsonSerializer.Deserialize<Judgement>(text, AgentJsonSchema.SerializerOptions)
                         ?? new Judgement { Passed = false, Score = 0, Rationale = "Judge returned no verdict." };
-        return new JudgementResult(judgement.Passed, judgement.Score, judgement.Rationale, usage, message.ToString() ?? text);
+        return new JudgementResult(judgement.Passed, judgement.Score, judgement.Rationale, call.Usage, message.ToString() ?? text, call.Metadata);
     }
+
+    private sealed record ModelCall(BetaMessage Message, ModelUsage Usage, string ContentJson, ModelCallMetadata Metadata);
 
     /// <summary>
     /// One model turn. On a <c>compaction</c> stop the full response content is appended as an assistant
     /// turn and the call is repeated, so the compaction block is what the model continues from. Returns the
-    /// final message, the summed usage and the JSON array of every response block in order.
+    /// final message, the summed usage, the JSON array of every response block in order, and the call
+    /// metadata (reasoning summary across continuations, final stop reason, effort, total latency).
     /// </summary>
-    private async Task<(BetaMessage Message, ModelUsage Usage, string ContentJson)> CallAsync(
+    private async Task<ModelCall> CallAsync(
         PromptEnvelope envelope,
         Func<List<BetaMessageParam>, MessageCreateParams> build,
+        string effort,
         CancellationToken ct)
     {
         var messages = PromptEnvelopeMapper.Messages(envelope);
         var blocks = new List<JsonElement>();
+        var reasoning = new StringBuilder();
         var prefixHash = envelope.PrefixHash();
         ModelUsage? total = null;
+        var stopwatch = Stopwatch.StartNew();
 
         for (var continuation = 0; ; continuation++)
         {
@@ -145,6 +159,7 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
 
             var responseBlocks = message.Content.Select(b => b.Json.Clone()).ToList();
             blocks.AddRange(responseBlocks);
+            AppendReasoning(reasoning, message);
 
             if (message.StopReason == CompactionStopReason && continuation < MaxCompactionContinuations)
             {
@@ -152,7 +167,13 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
                 continue;
             }
 
-            return (message, total, JsonSerializer.Serialize(blocks));
+            stopwatch.Stop();
+            var metadata = new ModelCallMetadata(
+                reasoning.Length == 0 ? null : reasoning.ToString(),
+                message.StopReason?.Raw(),
+                effort,
+                stopwatch.Elapsed.TotalMilliseconds);
+            return new ModelCall(message, total, JsonSerializer.Serialize(blocks), metadata);
         }
     }
 
@@ -168,7 +189,9 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
             MaxTokens = MaxOutputTokens,
             Messages = messages,
             OutputConfig = outputConfig,
-            Thinking = new BetaThinkingConfigAdaptive(),
+            // Summarized display returns a readable summary of the reasoning (the raw chain of thought is
+            // never exposed); the Evidence Plane stores it as text. Thinking is billed the same either way.
+            Thinking = new BetaThinkingConfigAdaptive { Display = Display.Summarized },
         };
         // Optional fields are layered on through the copy constructor so absent ones are never serialized.
         if (PromptEnvelopeMapper.CreateSystem(envelope) is { } system)
@@ -192,6 +215,17 @@ public sealed class AnthropicReasoningEngine : IReasoningEngine
         {
             var details = message.StopDetails;
             throw new AIRefusalException(details?.Category, details?.Explanation);
+        }
+    }
+
+    /// <summary>The text of the response's thinking blocks (the summary when <c>display: summarized</c>), one paragraph per block.</summary>
+    private static void AppendReasoning(StringBuilder reasoning, BetaMessage message)
+    {
+        foreach (var block in message.Content)
+        {
+            if (!block.TryPickThinking(out var thinking) || string.IsNullOrWhiteSpace(thinking.Thinking)) continue;
+            if (reasoning.Length > 0) reasoning.AppendLine().AppendLine();
+            reasoning.Append(thinking.Thinking.Trim());
         }
     }
 
