@@ -26,6 +26,8 @@ internal static class AgentModel
             // The lease expiry is a second concurrency token: a worker whose lease was taken over cannot commit its stale stage.
             e.Property(x => x.ClaimedBy).HasMaxLength(200);
             e.Property(x => x.ClaimedUntil).IsConcurrencyToken();
+            e.Property(x => x.TraceId).HasMaxLength(32);
+            e.Property(x => x.RootSpanId).HasMaxLength(16);
             e.Ignore(x => x.IsActive);
             e.Ignore(x => x.IsWaitingForApproval);
             e.HasIndex(x => new { x.Status, x.Stage });
@@ -97,7 +99,11 @@ internal static class AgentModel
             e.Property(x => x.Stage).HasConversion<string>().HasMaxLength(30);
             e.Property(x => x.Kind).HasMaxLength(30);
             e.Property(x => x.Model).HasMaxLength(100);
+            e.Property(x => x.CostUsd).HasPrecision(12, 6);
+            e.Property(x => x.StopReason).HasMaxLength(50);
+            e.Property(x => x.Effort).HasMaxLength(20);
             e.HasIndex(x => new { x.RunId, x.CreatedAt });
+            e.HasIndex(x => new { x.StepId, x.Kind });
         });
 
         b.Entity<AgentEpisode>(e =>

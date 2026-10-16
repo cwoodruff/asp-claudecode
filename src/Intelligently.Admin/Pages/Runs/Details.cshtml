@@ -1,26 +1,16 @@
 @page "/runs/{id:guid}"
-@using System.Text.Json
 @using Intelligently.Core.Agents.Entities
 @model Intelligently.Admin.Pages.Runs.DetailsModel
 @{
     ViewData["Title"] = $"Run {Model.Run.Id}";
-    var pretty = new JsonSerializerOptions { WriteIndented = true };
+    var runId = Model.Run.Id;
 
-    string Pretty(string json)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(doc.RootElement, pretty);
-        }
-        catch (JsonException)
-        {
-            return json;
-        }
-    }
+    string Pretty(string? json) => Intelligently.Admin.Pages.Runs.DetailsModel.PrettyJson(json);
+    string Usd(decimal value) => value.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture);
+    string Ms(double? value) => value is { } ms ? $"{ms:0} ms" : "—";
 }
 <h1>Agent run <code>@Model.Run.Id</code></h1>
-<p><a href="/runs">All runs</a> · <a href="/approvals">Approvals</a></p>
+<p><a href="/runs">All runs</a> · <a href="/approvals">Approvals</a> · <a href="/escalations">Escalations</a></p>
 
 <section id="run">
     <dl>
@@ -32,6 +22,11 @@
         <dt>Plan revision</dt><dd>@Model.Run.PlanRevision (step @Model.Run.CurrentStepIndex)</dd>
         <dt>Budget</dt><dd>replans @Model.Run.Budget.ReplansLeft · retries @Model.Run.Budget.RetriesLeft · tool calls @Model.Run.Budget.ToolCallsLeft · tokens @Model.Run.Budget.TokensLeft</dd>
         <dt>Tokens</dt><dd>@Model.Run.TotalInputTokens in · @Model.Run.TotalOutputTokens out</dd>
+        <dt>Cost</dt><dd data-run-cost="@Usd(Model.Run.TotalCostUsd)">$@Usd(Model.Run.TotalCostUsd) <small>(evidence rows: $@Usd(Model.TotalTraceCost))</small></dd>
+        @if (Model.Run.TraceId is not null)
+        {
+            <dt>Trace</dt><dd><code data-trace-id="@Model.Run.TraceId">@Model.Run.TraceId</code> <small>root span @Model.Run.RootSpanId</small></dd>
+        }
         <dt>Created</dt><dd>@Model.Run.CreatedAt.ToString("u")</dd>
         @if (Model.Run.CompletedAt is not null)
         {
@@ -40,6 +35,17 @@
         @if (!string.IsNullOrWhiteSpace(Model.Run.StatusReason))
         {
             <dt>Last transition</dt><dd>@Model.Run.StatusReason</dd>
+        }
+        @if (Model.Episode is not null)
+        {
+            <dt>Episode</dt>
+            <dd data-episode-id="@Model.Episode.Id">
+                @Model.Episode.Outcome — @Model.Episode.Summary
+                @if (Model.Episode.KnowledgeEntryId is { } entryId)
+                {
+                    <small>(linked to knowledge entry <span data-knowledge-entry-id="@entryId">@entryId</span>)</small>
+                }
+            </dd>
         }
     </dl>
     <details>
@@ -64,6 +70,13 @@
                     <li>@step.Description <small>[tool: @(step.Tool ?? "none")] — success: @step.SuccessCriteria</small></li>
                 }
             </ol>
+        </details>
+    }
+    @foreach (var call in Model.PlanCalls)
+    {
+        <details class="model-call" data-trace-id="@call.Id">
+            <summary>Planner call #@call.Id — @call.Model · @call.Stage · @(call.StopReason ?? "?") · $@Usd(call.CostUsd) · @Ms(call.LatencyMs)</summary>
+            <partial name="_ModelCall" model="call" />
         </details>
     }
 </section>
@@ -99,27 +112,81 @@
     else
     {
         <table>
-            <thead><tr><th>Started</th><th>Rev.</th><th>Step</th><th>Attempt</th><th>Status</th><th>Verifier</th><th>Detail</th></tr></thead>
+            <thead><tr><th>Started</th><th>Rev.</th><th>Step</th><th>Attempt</th><th>Status</th><th>Verifier</th><th>Tokens</th><th>Cost</th></tr></thead>
             <tbody>
                 @foreach (var step in Model.Steps)
                 {
-                    <tr data-step-status="@step.Status">
+                    var evidence = Model.EvidenceFor(step);
+                    var modelCall = evidence.ModelCall;
+                    <tr data-step-status="@step.Status" data-step-id="@step.Id" data-step-cost="@Usd(evidence.CostUsd)">
                         <td>@step.StartedAt.ToString("u")</td>
                         <td>@step.PlanRevision</td>
                         <td>@step.PlanStepIndex</td>
                         <td>@step.Attempt</td>
                         <td>@step.Status</td>
                         <td>@step.VerifierMessage</td>
-                        <td>
-                            <details>
-                                <summary>Calls and results</summary>
-                                @if (!string.IsNullOrWhiteSpace(step.AssistantText))
-                                {
-                                    <p><em>@step.AssistantText</em></p>
-                                }
-                                <pre>@Pretty(step.ToolCallsJson ?? "[]")</pre>
-                                <pre>@Pretty(step.ToolResultsJson ?? "[]")</pre>
-                            </details>
+                        <td>@evidence.InputTokens in · @evidence.OutputTokens out @(step.PromptTokens is { } counted ? $"(counted {counted})" : "")</td>
+                        <td>$@Usd(evidence.CostUsd)</td>
+                    </tr>
+                    <tr class="step-evidence" data-step-evidence="@step.Id">
+                        <td colspan="8">
+                            @if (!string.IsNullOrWhiteSpace(step.AssistantText))
+                            {
+                                <p class="assistant-text"><em>@step.AssistantText</em></p>
+                            }
+                            @if (modelCall is not null)
+                            {
+                                <details class="model-call" data-trace-id="@modelCall.Id">
+                                    <summary>Model call #@modelCall.Id — @modelCall.Model · @(modelCall.StopReason ?? "?") · effort @(modelCall.Effort ?? "?") · @modelCall.InputTokens in / @modelCall.CacheReadInputTokens cached / @modelCall.CacheCreationInputTokens written / @modelCall.OutputTokens out · $@Usd(modelCall.CostUsd) · @Ms(modelCall.LatencyMs)</summary>
+                                    <partial name="_ModelCall" model="modelCall" />
+                                </details>
+                            }
+                            else
+                            {
+                                <details>
+                                    <summary>Calls and results</summary>
+                                    <pre>@Pretty(step.ToolCallsJson ?? "[]")</pre>
+                                    <pre>@Pretty(step.ToolResultsJson ?? "[]")</pre>
+                                </details>
+                            }
+                            @foreach (var tool in evidence.ToolCalls)
+                            {
+                                var name = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "call", "Name") ?? "tool";
+                                var decision = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "decision") ?? "?";
+                                var risk = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "riskLevel") ?? "?";
+                                var isError = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "result", "IsError") == "true";
+                                <details class="tool-call" data-trace-id="@tool.Id" data-tool-error="@isError.ToString().ToLowerInvariant()">
+                                    <summary>Tool call #@tool.Id — <code>@name</code> · @decision · @risk · @(isError ? "error" : "ok") · @Ms(tool.LatencyMs)</summary>
+                                    <dl>
+                                        <dt>Input</dt><dd><pre>@(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "call", "input"))</pre></dd>
+                                        <dt>Decision</dt><dd>@decision — @(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "decisionReason")) <small>(@(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "rule")))</small></dd>
+                                        <dt>Result</dt><dd><pre class="tool-result">@(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "result", "Content"))</pre></dd>
+                                        @if (Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(tool, "result", "payload") is { } payload)
+                                        {
+                                            <dt>Payload</dt><dd><pre class="tool-payload">@payload</pre></dd>
+                                        }
+                                    </dl>
+                                    <button type="button" class="raw" hx-get="/runs/@runId?handler=Trace&traceId=@tool.Id" hx-target="#raw-@tool.Id" hx-swap="innerHTML">Raw JSON</button>
+                                    <div id="raw-@tool.Id" class="raw-target"></div>
+                                </details>
+                            }
+                            @foreach (var log in evidence.SandboxLogs)
+                            {
+                                var exit = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "exitCode") ?? "—";
+                                <details class="sandbox-log" data-trace-id="@log.Id" data-sandbox-exit-code="@exit">
+                                    <summary>Sandbox log #@log.Id — @(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "sandbox")) · exit @exit · timed out @(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "timedOut")) · @Ms(log.LatencyMs)</summary>
+                                    <dl>
+                                        <dt>stdout</dt><dd><pre class="stdout">@(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "stdout"))</pre></dd>
+                                        <dt>stderr</dt><dd><pre class="stderr">@(Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "stderr"))</pre></dd>
+                                        @if (Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField(log, "error") is { } sandboxError)
+                                        {
+                                            <dt>Error</dt><dd>@sandboxError</dd>
+                                        }
+                                    </dl>
+                                    <button type="button" class="raw" hx-get="/runs/@runId?handler=Trace&traceId=@log.Id" hx-target="#raw-@log.Id" hx-swap="innerHTML">Raw JSON</button>
+                                    <div id="raw-@log.Id" class="raw-target"></div>
+                                </details>
+                            }
                         </td>
                     </tr>
                 }
@@ -137,18 +204,23 @@
     else
     {
         <table>
-            <thead><tr><th>#</th><th>At</th><th>Stage</th><th>Kind</th><th>Model</th><th>Tokens</th><th>Payload</th></tr></thead>
+            <thead><tr><th>#</th><th>At</th><th>Stage</th><th>Kind</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Latency</th><th>Payload</th></tr></thead>
             <tbody>
                 @foreach (var trace in Model.Traces)
                 {
-                    <tr data-trace-kind="@trace.Kind">
+                    <tr data-trace-kind="@trace.Kind" data-trace-row="@trace.Id">
                         <td>@trace.Id</td>
                         <td>@trace.CreatedAt.ToString("u")</td>
                         <td>@trace.Stage</td>
                         <td>@trace.Kind</td>
                         <td>@trace.Model</td>
                         <td>@(trace.InputTokens + trace.OutputTokens > 0 ? $"{trace.InputTokens} in · {trace.OutputTokens} out" : "")</td>
-                        <td><details><summary>Show</summary><pre>@Pretty(trace.Payload)</pre></details></td>
+                        <td>@(trace.CostUsd > 0 ? "$" + Usd(trace.CostUsd) : "")</td>
+                        <td>@Ms(trace.LatencyMs)</td>
+                        <td>
+                            <button type="button" class="raw" hx-get="/runs/@runId?handler=Trace&traceId=@trace.Id" hx-target="#trace-@trace.Id" hx-swap="innerHTML">Show</button>
+                            <div id="trace-@trace.Id" class="raw-target"></div>
+                        </td>
                     </tr>
                 }
             </tbody>

@@ -5,6 +5,7 @@ using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 
@@ -20,7 +21,9 @@ public sealed class ActHandler : IStageHandler
     private readonly IToolDispatcher _dispatcher;
     private readonly IApprovalGate _approvals;
     private readonly IEvidenceSink _evidence;
+    private readonly ICostAccountant _costs;
     private readonly IntelligentlyDbContext _db;
+    private readonly string _model;
 
     public ActHandler(
         IContextAssembler context,
@@ -28,14 +31,18 @@ public sealed class ActHandler : IStageHandler
         IToolDispatcher dispatcher,
         IApprovalGate approvals,
         IEvidenceSink evidence,
-        IntelligentlyDbContext db)
+        ICostAccountant costs,
+        IntelligentlyDbContext db,
+        IOptions<Core.Agents.AgentsOptions> options)
     {
         _context = context;
         _engine = engine;
         _dispatcher = dispatcher;
         _approvals = approvals;
         _evidence = evidence;
+        _costs = costs;
         _db = db;
+        _model = options.Value.DefaultModel;
     }
 
     public AgentStage Stage => AgentStage.Act;
@@ -66,10 +73,13 @@ public sealed class ActHandler : IStageHandler
 
         var envelope = await _context.BuildAsync(run, Stage, ct);
         step.PromptTokens = envelope.InputTokens;
-        var decision = await _engine.DecideAsync(envelope, ct);
 
-        UsageAccounting.Apply(run, decision.Usage);
-        await _evidence.RecordAsync(run, UsageAccounting.ModelCallTrace(Stage, envelope, decision.Usage, decision.RawResponse, step.Id), ct);
+        DecisionResult decision;
+        using (_evidence.StartModelCall(run, Stage, _model, "medium"))
+        {
+            decision = await _engine.DecideAsync(envelope, ct);
+            await UsageAccounting.RecordAsync(_costs, _evidence, run, Stage, envelope, decision.Usage, decision.RawResponse, decision.ContentJson, decision.Metadata, step.Id, ct);
+        }
 
         step.AssistantText = decision.AssistantText;
         step.ToolCallsJson = JsonSerializer.Serialize(decision.ToolCalls);
@@ -108,7 +118,7 @@ public sealed class ActHandler : IStageHandler
     {
         if (calls.Count > 0)
         {
-            var dispatch = await _dispatcher.DispatchAsync(run, calls, ct);
+            var dispatch = await _dispatcher.DispatchAsync(run, calls, ct, step.Id);
             if (dispatch.RequiresApproval)
                 return await ParkAsync(run, step, dispatch, results, ct);
 

@@ -50,6 +50,12 @@ public sealed class AgentRun
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 
+    /// <summary>W3C trace id (32 hex chars) of the run's root span; every stage span of the run, in any process, shares it.</summary>
+    public string? TraceId { get; set; }
+
+    /// <summary>W3C span id (16 hex chars) of the run's root span; stage spans are its children.</summary>
+    public string? RootSpanId { get; set; }
+
     /// <summary>Optimistic concurrency token, regenerated on every commit; together with the lease it stops a second worker instance from double-processing a run.</summary>
     public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
 

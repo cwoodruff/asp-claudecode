@@ -6,6 +6,7 @@ using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
 using Intelligently.Core.Agents.Tools;
 using Intelligently.Infrastructure.Data;
+using Microsoft.Extensions.Options;
 
 namespace Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 
@@ -16,15 +17,26 @@ public sealed class PlanHandler : IStageHandler
     private readonly IReasoningEngine _engine;
     private readonly IToolRegistry _tools;
     private readonly IEvidenceSink _evidence;
+    private readonly ICostAccountant _costs;
     private readonly IntelligentlyDbContext _db;
+    private readonly string _model;
 
-    public PlanHandler(IContextAssembler context, IReasoningEngine engine, IToolRegistry tools, IEvidenceSink evidence, IntelligentlyDbContext db)
+    public PlanHandler(
+        IContextAssembler context,
+        IReasoningEngine engine,
+        IToolRegistry tools,
+        IEvidenceSink evidence,
+        ICostAccountant costs,
+        IntelligentlyDbContext db,
+        IOptions<Core.Agents.AgentsOptions> options)
     {
         _context = context;
         _engine = engine;
         _tools = tools;
         _evidence = evidence;
+        _costs = costs;
         _db = db;
+        _model = options.Value.DefaultModel;
     }
 
     public AgentStage Stage => AgentStage.Plan;
@@ -36,10 +48,13 @@ public sealed class PlanHandler : IStageHandler
             return Exhausted(run, "before planning");
 
         var envelope = await _context.BuildAsync(run, Stage, ct);
-        var result = await _engine.PlanAsync(envelope, ct);
 
-        UsageAccounting.Apply(run, result.Usage);
-        await _evidence.RecordAsync(run, UsageAccounting.ModelCallTrace(Stage, envelope, result.Usage, result.RawResponse), ct);
+        PlanResult result;
+        using (_evidence.StartModelCall(run, Stage, _model, "high"))
+        {
+            result = await _engine.PlanAsync(envelope, ct);
+            await UsageAccounting.RecordAsync(_costs, _evidence, run, Stage, envelope, result.Usage, result.RawResponse, result.ContentJson, result.Metadata, null, ct);
+        }
 
         if (run.Budget.IsExhausted)
             return Exhausted(run, "after the planner call");

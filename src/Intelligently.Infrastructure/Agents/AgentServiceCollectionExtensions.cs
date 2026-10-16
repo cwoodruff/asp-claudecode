@@ -9,6 +9,7 @@ using Intelligently.Infrastructure.Agents.Execution;
 using Intelligently.Infrastructure.Agents.Execution.Mcp;
 using Intelligently.Infrastructure.Agents.Execution.Sandboxes;
 using Intelligently.Infrastructure.Agents.Intelligence;
+using Intelligently.Infrastructure.Agents.Learn;
 using Intelligently.Infrastructure.Agents.StateGraph;
 using Intelligently.Infrastructure.Agents.StateGraph.Handlers;
 using Microsoft.Extensions.Configuration;
@@ -80,8 +81,14 @@ public static class AgentServiceCollectionExtensions
         services.AddScoped<IApprovalGate, ApprovalGate>();
         services.AddScoped<IPolicyDecisionPoint, PolicyDecisionPoint>();
 
-        // Evidence Plane
+        // Evidence Plane: spans, append-only trace rows and the run totals on the scoped DbContext; the
+        // price table is shared
         services.AddScoped<IEvidenceSink, OtelEvidenceSink>();
+        services.AddSingleton<ICostAccountant, CostAccountant>();
+
+        // Learn: the single episode writer (Learn stage and instructor resolution both go through it)
+        services.AddScoped<EpisodeWriter>();
+        services.AddScoped<IEscalationResolver, EscalationResolver>();
 
         return services;
     }

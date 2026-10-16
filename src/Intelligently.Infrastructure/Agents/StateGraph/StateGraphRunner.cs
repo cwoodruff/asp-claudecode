@@ -4,6 +4,7 @@ using Intelligently.Core.Agents;
 using Intelligently.Core.Agents.Contracts;
 using Intelligently.Core.Agents.Entities;
 using Intelligently.Core.Agents.StateGraph;
+using Intelligently.Core.Telemetry;
 using Intelligently.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -152,6 +153,7 @@ public sealed class StateGraphRunner
         {
             Stage = from,
             Kind = AgentTrace.KindTransition,
+            LatencyMs = stopwatch.Elapsed.TotalMilliseconds,
             Payload = JsonSerializer.Serialize(new
             {
                 from = from.ToString(),
@@ -164,6 +166,15 @@ public sealed class StateGraphRunner
 
         span?.SetTag("agent.next_stage", outcome.Next.ToString());
         span?.SetTag("agent.status", run.Status);
+        AgentTelemetry.StageDuration.Record(stopwatch.Elapsed.TotalMilliseconds, new TagList
+        {
+            { AgentTelemetry.TagStage, from.ToString() },
+            { AgentTelemetry.TagNextStage, outcome.Next.ToString() },
+        });
+
+        // A terminal transition closes the evidence for the run: totals land on the analytics event.
+        if (StageTransitions.IsTerminal(outcome.Next))
+            await _evidence.FinishRunAsync(run, ct);
 
         await CommitAsync(run, transaction, ct);
 
@@ -198,6 +209,7 @@ public sealed class StateGraphRunner
             Kind = AgentTrace.KindNote,
             Payload = JsonSerializer.Serialize(new { error = reason }),
         }, ct);
+        await _evidence.FinishRunAsync(run, ct);
         await CommitAsync(run, transaction, ct);
     }
 

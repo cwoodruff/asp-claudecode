@@ -1,0 +1,46 @@
+@using Intelligently.Core.Agents.Entities
+@model AgentTrace
+@{
+    var details = Intelligently.Admin.Pages.Runs.DetailsModel.PayloadField;
+    string Usd(decimal value) => value.ToString("0.000000", System.Globalization.CultureInfo.InvariantCulture);
+}
+<dl class="model-call-details" data-model-call="@Model.Id">
+    <dt>Model</dt><dd>@Model.Model · effort <span data-effort="@Model.Effort">@(Model.Effort ?? "?")</span> · stop reason <span data-stop-reason="@Model.StopReason">@(Model.StopReason ?? "?")</span></dd>
+    <dt>Tokens</dt><dd>@Model.InputTokens input · @Model.CacheReadInputTokens cache read · @Model.CacheCreationInputTokens cache creation · @Model.OutputTokens output</dd>
+    <dt>Cost</dt><dd data-cost-usd="@Usd(Model.CostUsd)">$@Usd(Model.CostUsd)</dd>
+    <dt>Latency</dt><dd>@(Model.LatencyMs is { } ms ? $"{ms:0} ms" : "—")</dd>
+    <dt>Reasoning summary</dt>
+    <dd>
+        @if (string.IsNullOrWhiteSpace(Model.ReasoningSummary))
+        {
+            <em class="text-muted">none returned</em>
+        }
+        else
+        {
+            <pre class="reasoning-summary">@Model.ReasoningSummary</pre>
+        }
+    </dd>
+    <dt>Prompt envelope</dt>
+    <dd>
+        <details>
+            <summary>System blocks, tools and messages as sent (prefix @(details(Model, "envelope", "prefixHash")?[..Math.Min(12, details(Model, "envelope", "prefixHash")?.Length ?? 0)])…, counted @(details(Model, "envelope", "promptTokens")) tokens)</summary>
+            <pre class="prompt-envelope">@(details(Model, "envelope"))</pre>
+        </details>
+    </dd>
+    <dt>Response</dt>
+    <dd>
+        <details>
+            <summary>Raw response</summary>
+            <pre class="raw-response">@(details(Model, "response"))</pre>
+        </details>
+        @if (details(Model, "content") is { } content)
+        {
+            <details>
+                <summary>Content blocks</summary>
+                <pre class="response-content">@content</pre>
+            </details>
+        }
+    </dd>
+</dl>
+<button type="button" class="raw" hx-get="/runs/@Model.RunId?handler=Trace&traceId=@Model.Id" hx-target="#raw-@Model.Id" hx-swap="innerHTML">Raw JSON</button>
+<div id="raw-@Model.Id" class="raw-target"></div>

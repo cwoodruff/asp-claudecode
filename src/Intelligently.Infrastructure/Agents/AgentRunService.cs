@@ -13,12 +13,14 @@ public sealed class AgentRunService
 {
     private readonly IntelligentlyDbContext _db;
     private readonly IRunQueue _queue;
+    private readonly IEvidenceSink _evidence;
     private readonly AgentsOptions _options;
 
-    public AgentRunService(IntelligentlyDbContext db, IRunQueue queue, IOptions<AgentsOptions> options)
+    public AgentRunService(IntelligentlyDbContext db, IRunQueue queue, IEvidenceSink evidence, IOptions<AgentsOptions> options)
     {
         _db = db;
         _queue = queue;
+        _evidence = evidence;
         _options = options.Value;
     }
 
@@ -47,6 +49,9 @@ public sealed class AgentRunService
                 WallClockLeft = TimeSpan.FromMinutes(budgets.WallClockMinutes),
             },
         };
+
+        // The run's root span: every stage span, whichever worker executes it, is parented on it.
+        _evidence.StartRun(run);
 
         _db.AgentRuns.Add(run);
         await _db.SaveChangesAsync(ct);
