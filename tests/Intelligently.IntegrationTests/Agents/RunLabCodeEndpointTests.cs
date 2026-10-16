@@ -65,10 +65,10 @@ public class RunLabCodeEndpointTests : IClassFixture<AgentWebFactory>
                     expected_output = "hi",
                 }))],
                 "Running the lab.", "tool_use", Usage, "{}"));
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-lab", 7);
         var before = _factory.Sandbox.Requests.Count;
 
-        var created = await client.PostAsJsonAsync("/agent/runs", new { userId = "learner-lab", courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { error = "none" } });
+        var created = await client.PostAsJsonAsync("/agent/runs", new { courseId = 7, taskType = "LabErrorDiagnosis", taskSpec = new { error = "none" } });
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 

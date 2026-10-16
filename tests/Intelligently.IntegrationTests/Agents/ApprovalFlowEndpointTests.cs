@@ -60,11 +60,10 @@ public class ApprovalFlowEndpointTests : IClassFixture<AgentWebFactory>
         return html;
     }
 
-    private async Task<Guid> CreateRunAsync(HttpClient client, string userId)
+    private async Task<Guid> CreateRunAsync(HttpClient client)
     {
         var created = await client.PostAsJsonAsync("/agent/runs", new
         {
-            userId,
             courseId = 7,
             taskType = "NoteCleanup",
             taskSpec = new { noteId = 42 },
@@ -77,10 +76,10 @@ public class ApprovalFlowEndpointTests : IClassFixture<AgentWebFactory>
     public async Task Destructive_call_parks_the_run_and_approving_it_lets_the_worker_finish()
     {
         StubDestructivePlan();
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-approve", 7);
         var before = _factory.DestructiveTool.Executions;
 
-        var id = await CreateRunAsync(client, "learner-approve");
+        var id = await CreateRunAsync(client);
 
         var waiting = await PollUntilAsync(client, id, AgentRun.StatusWaiting, TimeSpan.FromSeconds(30));
         waiting.Should().Contain("data-stage=\"AwaitingApproval\"");
@@ -128,10 +127,10 @@ public class ApprovalFlowEndpointTests : IClassFixture<AgentWebFactory>
     public async Task Denying_the_call_sends_the_run_through_Recover_to_a_new_plan_revision()
     {
         StubDestructivePlan();
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient().AsLearner("learner-deny", 7);
         var before = _factory.DestructiveTool.Executions;
 
-        var id = await CreateRunAsync(client, "learner-deny");
+        var id = await CreateRunAsync(client);
         await PollUntilAsync(client, id, AgentRun.StatusWaiting, TimeSpan.FromSeconds(30));
 
         Guid approvalId = Guid.Empty;

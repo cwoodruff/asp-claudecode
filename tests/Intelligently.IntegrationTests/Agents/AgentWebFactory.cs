@@ -51,6 +51,9 @@ public sealed class AgentWebFactory : WebApplicationFactory<Intelligently.Web.Ag
             _keepAlive.Open();
             services.AddDbContext<IntelligentlyDbContext>(o => o.UseSqlite(_connectionString));
 
+            // Header-driven authentication (see TestAuthHandler); Identity's cookie scheme still handles challenges.
+            services.AddTestAuthentication();
+
             services.RemoveAll<IReasoningEngine>();
             services.AddSingleton(Engine.Object);
             services.RemoveAll<IPromptTokenCounter>();

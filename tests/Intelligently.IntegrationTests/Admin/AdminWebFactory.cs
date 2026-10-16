@@ -35,6 +35,9 @@ public sealed class AdminWebFactory : WebApplicationFactory<Intelligently.Admin.
             _keepAlive = new SqliteConnection(_connectionString);
             _keepAlive.Open();
             services.AddDbContext<IntelligentlyDbContext>(o => o.UseSqlite(_connectionString));
+
+            // Header-driven authentication (see TestAuthHandler); Identity's cookie scheme still handles challenges.
+            services.AddTestAuthentication();
         });
     }
 
