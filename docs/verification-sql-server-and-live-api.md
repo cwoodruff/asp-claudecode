@@ -105,17 +105,37 @@ Everything else the run needs is ready:
 - The lab for the run: one learner file `Program.cs` with a missing semicolon, `error_text` the CS1003
   line, `expected_output` `"Hello, lab!\n"`, `learner_level` Beginner, course 1.
 
-To run it, supply the key once for both hosts (they share the new `UserSecretsId`):
+**The live API smoke run was not performed.** The decision was to close this verification without it rather
+than wait for a key. To run it later:
 
-```bash
-dotnet user-secrets set "Anthropic:ApiKey" "<key>" --project src/Intelligently.Web
-```
+1. Supply the key once for both hosts (they share the `UserSecretsId` added here), and turn the candidate
+   search off so the run is one planner call:
 
-then create the run as the learner through `POST /agent/runs` and read it back on `GET /agent/runs/{id}`
-and Admin `/runs/{id}`. The questions this run must answer, none of which can be answered without it:
-structured-output planning succeeded; a reasoning summary was captured (`ReasoningSummary` on the Plan
-`ModelCall` row); `CacheReadInputTokens > 0` on the second model call; the total cost on `AgentRun`; the
-final stage.
+   ```bash
+   dotnet user-secrets set "Anthropic:ApiKey" "<key>" --project src/Intelligently.Web
+   ```
+
+   ```bash
+   dotnet user-secrets set "Agents:CandidateSearch:Candidates" "1" --project src/Intelligently.Web
+   ```
+
+2. Start the Web app (`dotnet run --project src/Intelligently.Web`, Development profile, LocalDB) and
+   sign in as the seeded learner (accounts in `verification-local-accounts.md` in the side-session notes
+   folder, or provision a learner with an `intelligently:course` claim for course 1 through `UserManager`).
+3. Create one run as that learner with `POST /agent/runs`: `courseId` 1, `taskType` `LabErrorDiagnosis`, and
+   the lab above as `taskSpec` (`language` `csharp`, `entrypoint` `Program.cs`, `course_files` empty).
+4. Watch `GET /agent/runs/{id}` (htmx partial polls while Running) and, as the seeded instructor, the Admin
+   trace viewer at `/runs/{id}`.
+5. Record in this note:
+   - whether structured-output planning succeeded (the Plan stage produced an `AgentPlan` with template
+     phases; the Plan `ModelCall` row's stop reason);
+   - whether the reasoning summary was captured (`ReasoningSummary` on the Plan `ModelCall` row is non-empty,
+     from `thinking: {type: adaptive, display: summarized}`);
+   - whether the prompt cache hit on the second model call of the run (`CacheReadInputTokens > 0` on the
+     second `ModelCall` row; `CacheHealthMonitor` warns when a repeated prefix reads zero);
+   - the total cost recorded (`AgentRun.TotalCostUsd` and the `AgentRunFinished` analytics event);
+   - the final stage and status (`Completed` with `FinalExplanation` and `FixDiff` stored, or where it
+     stopped and why).
 
 ## 3. What was fixed
 
@@ -160,7 +180,8 @@ sandbox template change together with the integration suite (43/43).
 
 ## Open items
 
-1. **Live API smoke run** (section 2): needs `Anthropic:ApiKey`; then update this note with the five answers.
+1. **Live API smoke run** (section 2): not performed; needs `Anthropic:ApiKey`. Follow the five steps there
+   and record the five answers in this note.
 2. **Full-text branch of `Phase3ContextPlane`**: apply the migrations to a SQL Server with full-text
    installed (`localhost` on this machine) and run a `lookup_knowledge` call so `FREETEXT` executes once.
 3. The Wasm epoch tick runs on the thread pool; if the lag seen in tests matters in production (a starved
